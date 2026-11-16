@@ -1,0 +1,18 @@
+# 人體感應器韌體（產品版）：給「拿到原廠感應器的人」使用的通用韌體。共用內容在 presence-common.yaml。
+# 和單台版（presence-device.example.yaml）的差別只有兩點：
+#   1. 名稱加 MAC 尾碼（presence-xxxxxx），多台放在同一個網路不會撞名。
+#   2. 多了 improv_serial：用網頁安裝頁（USB 線＋支援 Web Serial 的瀏覽器）刷完，可以直接在同一個網頁設定 Wi-Fi。
+# 原廠韌體走 Wi-Fi OTA 換成這版也可以（原廠開著無密碼的 ESPHome OTA，分區表相同）。
+# 韌體不含任何 Wi-Fi 帳密、API 加密金鑰或 OTA 密碼。
+substitutions:
+  devicename: presence
+  upper_devicename: Presence Sensor
+  device_label: 人體感應器
+  mac_suffix: "true"
+  # 時區預設台北（Asia/Taipei）；要整點報時的時間正確，請改成自己的時區（IANA 名稱，例如 Europe/Berlin）
+  # timezone: "Europe/Berlin"
+
+packages:
+  common: !include presence-common.yaml
+
+improv_serial:

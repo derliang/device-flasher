@@ -3,26 +3,27 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Device Flasher</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta http-equiv="refresh" content="0; url=./web/">
+<title>裝置韌體工具</title>
 <style>
-:root{--bg:#f6f7f9;--fg:#1c2430;--mut:#5b6573;--card:#fff;--bd:#d9dee5}
-@media (prefers-color-scheme:dark){:root{--bg:#12161c;--fg:#e8ecf1;--mut:#9aa6b4;--card:#1b212a;--bd:#2d3643}}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI","Noto Sans TC",sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center}
-main{max-width:34rem;margin:16px;padding:28px 24px;background:var(--card);border:1px solid var(--bd);border-radius:14px}
-h1{margin:0 0 8px;font-size:1.5rem}
-p{margin:.5rem 0}.mut{color:var(--mut)}
+  :root{--bg:#f4f7fb;--fg:#10223d;--muted:#4a5b75;--primary:#1b6ad0;--card:#fff;--line:#d7e0ee}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1626;--fg:#e8eef9;--muted:#a3b3cc;--primary:#6cb0ff;--card:#14213a;--line:#263553}}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:grid;place-items:center;padding:16px;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI","Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;line-height:1.6}
+  main{max-width:28rem;width:100%;padding:24px;border:1px solid var(--line);border-radius:14px;background:var(--card);text-align:center}
+  h1{margin:0 0 8px;font-size:1.35rem}
+  p{margin:0 0 16px;color:var(--muted)}
+  a{display:inline-block;margin:4px 8px;padding:10px 18px;border-radius:10px;background:var(--primary);color:#fff;font-weight:700;text-decoration:none}
+  @media (prefers-color-scheme:dark){a{color:#06101f}}
+  a:focus-visible{outline:3px solid var(--fg);outline-offset:2px}
 </style>
 </head>
 <body>
 <main>
-<h1>Device Flasher</h1>
-<p><strong>建置中</strong></p>
-<ul><li>人體感應器（ESP32-C3）：USB 直連，瀏覽器備份／更新／還原韌體</li><li>S31 插座：OTA 更新教學與韌體下載（韌體暫未開放）</li></ul>
-<p class="mut">全部在瀏覽器本機執行，不上傳資料。感應器需電腦版 Chrome 或 Edge 與 USB。</p>
-<hr style="border:0;border-top:1px solid var(--bd);margin:16px 0">
-<p><strong>Under construction</strong></p>
-<ul><li>Presence sensor (ESP32-C3): direct USB, back up / update / restore firmware in the browser</li><li>S31 smart plug: OTA update guide and firmware download (firmware not yet available)</li></ul>
-<p class="mut">Runs entirely in your browser; nothing is uploaded. Sensor flashing requires desktop Chrome or Edge and USB.</p>
+  <h1>裝置韌體工具 · Device Firmware Tools</h1>
+  <p>正在帶你前往刷機頁；如果沒有自動跳轉，請按下面的連結。<br>Taking you to the tool; if nothing happens, use the link below.</p>
+  <a href="./web/">前往刷機頁</a><a href="./web/" lang="en">Go to the tool</a>
 </main>
 </body>
 </html>

@@ -1,0 +1,14 @@
+# 單台感應器設定範例：複製本檔成 presence-<名稱>.yaml，改下面三個值。
+# devicename 只能用小寫英數與連字號，不可與同一網路的其他台重複。
+# 每台感應器要在各自的位置重新校準。
+substitutions:
+  devicename: presence-room
+  upper_devicename: Presence Room
+  device_label: 房間感應器
+  # 選用：覆寫通用預設值
+  # timezone: "Europe/Berlin"       # 整點報時用的時區，預設台北（Asia/Taipei）
+  # temp_offset_default: "0"        # 溫度補償（度）
+  # humi_offset_default: "0"        # 濕度補償（%RH）
+
+packages:
+  common: !include presence-common.yaml

@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="zh-Hant" data-lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="description" content="Back up, update and restore a presence sensor over USB, entirely in your browser. 在瀏覽器本機用 USB 備份、更新、還原人體感應器。">
+<title>裝置韌體工具 Device Firmware Tools</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%231b6ad0'/%3E%3Cg fill='none' stroke='white' stroke-width='2' stroke-linecap='round'%3E%3Crect x='7' y='7' width='10' height='10' rx='2'/%3E%3Cpath d='M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="stylesheet" href="./app.css">
+<!-- 本頁所有操作都在瀏覽器本機執行，不載入任何外部資源、不放分析碼。畫面文字用 [[中文||English]] 與 {{I 圖示}}，載入時由 app.mjs 展開。 -->
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="logo"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg></div>
+    <div class="grow">
+      <h1><span class="l zh">裝置韌體工具</span><span class="l en">Device Firmware Tools</span></h1>
+      <p><span class="l zh">人體感應器：用 USB 備份、更新、還原。</span><span class="l en">Presence sensor: back up, update and restore over USB.</span></p>
+    </div>
+    <div class="langsw" role="group" aria-label="Language / 語言">
+      <button type="button" data-lang="zh" aria-pressed="true">中文</button><button type="button" data-lang="en" aria-pressed="false">EN</button>
+    </div>
+  </header>
+  <div class="trust">
+    <span><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg><span class="l zh">檔案不會上傳到任何伺服器</span><span class="l en">Nothing is uploaded to any server</span></span>
+    <span><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v13"/><circle cx="12" cy="19" r="2"/><path d="M12 8l4 2v3M12 11l-4-2"/><circle cx="8" cy="8.6" r="1"/></svg><span class="l zh">感應器用 USB 序列埠連接</span><span class="l en">The sensor connects over a USB serial port</span></span>
+    <span><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span class="l zh">不需登入、不收集資料</span><span class="l en">No sign-in, no data collection</span></span>
+  </div>
+
+  <main id="main" tabindex="-1" style="display:flex;flex-direction:column;gap:var(--s4);outline:none">
+    <noscript><div class="noscript"><span class="l zh">這個工具需要 JavaScript 才能使用。</span><span class="l en">This tool needs JavaScript.</span></div></noscript>
+    <div id="gate-root"></div>
+    <div id="tool-root"></div>
+  </main>
+
+  <footer class="foot">
+    <div class="footlinks" id="footlinks" hidden>
+      <a href="#terms" data-act="open-terms"><span class="l zh">條款與免責聲明</span><span class="l en">Terms and disclaimer</span></a>
+      <button type="button" class="btn btn-ghost btn-sm" data-act="dl-consent">{{I download}}<span class="l zh">下載我的同意紀錄</span><span class="l en">Download my consent record</span></button>
+    </div>
+    <span><span class="l zh">感應器的備份、更新、還原都在你的瀏覽器本機執行，檔案不會上傳到任何伺服器。</span><span class="l en">Sensor backup, update and restore run locally in your browser; no file is uploaded to any server.</span></span>
+    <span><span class="l zh">刷寫韌體有風險，請自行承擔；操作前請閱讀各畫面的提示。</span><span class="l en">Flashing firmware carries risk and is done at your own responsibility; read the notices on each screen first.</span></span>
+    <span><span class="l zh">條款版本</span><span class="l en">Terms version</span> <span data-b="termsVersion"></span> · <span class="l zh">工具版本</span><span class="l en">Tool version</span> <span data-b="toolVersion"></span></span>
+  </footer>
+</div>
+
+<!-- ============ 同意閘門：整頁最先出現的畫面（同意前，工具的畫面根本不在 DOM 裡） ============ -->
+<template id="tpl-gate">
+<section class="screen on" data-screen="consent">
+  <div class="note warn" data-box="upd-version" hidden>{{I info}}<div><span class="l zh"><b>條款已更新到 <span data-b="newVer"></span>，需要重新同意。</b>你上次同意的是 <span data-b="oldVer"></span>（<span data-b="oldDate"></span>）。</span><span class="l en"><b>The terms were updated to <span data-b="newVer"></span> and need to be accepted again.</b> You last accepted <span data-b="oldVer"></span> (<span data-b="oldDate"></span>).</span></div></div>
+  <div class="note warn" data-box="upd-expired" hidden>{{I info}}<div><span class="l zh"><b>你上次同意（<span data-b="oldDate"></span>）已超過 30 天，需要重新同意。</b></span><span class="l en"><b>Your last consent (<span data-b="oldDate"></span>) is more than 30 days old and must be given again.</b></span></div></div>
+  <div class="note info big">{{I shield}}<div>
+    <h3 id="gateTitle" tabindex="-1">[[使用前請先閱讀並同意條款||Please read and accept the terms before using this site]]</h3>
+    [[沒有同意之前，連接設備、備份、更新、還原與韌體下載都無法使用。不同意就不能繼續。||Until you accept, connecting, backup, update, restore and firmware downloads are unavailable. If you do not agree you cannot continue.]]
+  </div></div>
+  <section class="card gate">
+    <header class="cardhead"><h2>[[使用條款與免責聲明||Terms of use and disclaimer]]</h2><span class="tag off">[[條款版本||Terms version]] <span data-b="termsVersion"></span></span></header>
+    <p class="hint" id="scrollHint">[[請把下面的條款捲到最底，才能按「同意並繼續」。||Scroll the terms below to the very bottom to enable “Agree and continue”.]]</p>
+    <div class="terms" id="termsBox" tabindex="0" role="region" aria-label="[[使用條款||Terms of use]]">
+      <ol class="terms-list" id="termsList"></ol>
+      <p class="endmark">[[— 條款到此結束 —||— End of terms —]]</p>
+    </div>
+    <ul class="checks reqs" aria-live="polite">
+      <li id="rq1" class="no">{{I check}}{{I x}}<div>[[① 已把條款捲到最底||1. Scrolled the terms to the bottom]]</div></li>
+      <li id="rq2" class="no">{{I check}}{{I x}}<div>[[② 下面四項都已各自勾選||2. All four statements below ticked individually]]</div></li>
+      <li id="rq3" class="no">{{I check}}{{I x}}<div>[[③ 已輸入確認詞||3. Confirmation word entered]]</div></li>
+    </ul>
+    <fieldset class="agree4">
+      <legend class="sr">[[四項聲明，請逐項勾選||Four statements: tick each one]]</legend>
+      <label class="opt"><input type="checkbox" class="ag"><span class="t">[[我已閱讀並理解上述風險與條款。||I have read and understood the risks and terms above.]]</span></label>
+      <label class="opt"><input type="checkbox" class="ag"><span class="t">[[我同意責任限制與免責（含不得向提供者請求損害賠償，法律不允許排除者除外）。||I agree to the limitation of liability and disclaimer (including not claiming damages from the provider, except where the law does not allow this to be excluded).]]</span></label>
+      <label class="opt"><input type="checkbox" class="ag"><span class="t">[[我已自行備份，或自願承擔不備份的風險。||I have made my own backup, or I voluntarily accept the risk of not having one.]]</span></label>
+      <label class="opt"><input type="checkbox" class="ag"><span class="t">[[我已成年（或已取得監護人同意），並有權操作這台設備。||I am of legal age (or have my guardian's consent) and am entitled to operate this device.]]</span></label>
+    </fieldset>
+    <div class="field"><label for="agreeWord">[[請輸入確認詞：我同意（或 I AGREE）||Type the confirmation word: I AGREE (or 我同意)]]</label><input type="text" id="agreeWord" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="我同意 / I AGREE" style="max-width:260px;letter-spacing:.05em"></div>
+    <div class="btns"><button type="button" class="btn btn-primary grow" id="agreeBtn" disabled aria-describedby="agreeWhy">{{I check}}[[同意並繼續||Agree and continue]]</button><button type="button" class="btn btn-ghost grow" id="declineBtn">[[不同意||Do not agree]]</button></div>
+    <p class="hint" id="agreeWhy" aria-live="polite"></p>
+    <p class="hint">[[你的同意紀錄只存在這個瀏覽器，不會上傳。||Your consent record stays in this browser and is never uploaded.]]</p>
+  </section>
+  <section class="card inert" inert aria-disabled="true">
+    <h2>[[同意前停用的功能||Features disabled until you accept]]</h2>
+    <p class="sub">[[灰色＝目前不能用。同意後才會啟用。||Greyed out = unavailable for now. They are enabled after you accept.]]</p>
+    <div class="files">
+      <div class="file"><span class="ico">{{I usb}}</span><div class="nm">[[人體感應器：USB 備份、更新、還原||Presence sensor: USB backup, update, restore]]</div><button type="button" class="btn btn-ghost btn-sm" disabled tabindex="-1">[[連接設備||Connect device]]</button></div>
+      <div class="file"><span class="ico">{{I wifi}}</span><div class="nm">[[S31 智慧插座：韌體尚未開放||S31 smart plug: firmware not released yet]]</div></div>
+    </div>
+  </section>
+</section>
+
+<!-- 不同意：終止畫面（沒有任何刷機、連接、下載入口；沒有寫入任何「已同意」紀錄） -->
+<section class="screen" data-screen="declined">
+  <div class="note bad big">{{I x}}<div>
+    <h3 id="declinedTitle" tabindex="-1">[[沒有同意條款，就無法使用本服務||Without accepting the terms, the Service cannot be used]]</h3>
+    [[你選了「不同意」，所以這一頁不提供連接設備、備份、更新、還原，也不提供韌體下載。你沒有留下任何「已同意」的紀錄。||You chose “Do not agree”, so this page offers no device connection, backup, update, restore or firmware download. No “accepted” record has been saved.]]
+  </div></div>
+  <section class="card">
+    <h2>[[接下來||What now]]</h2>
+    <p>[[想改變主意，可以重新閱讀條款，再決定要不要同意。不想使用，直接離開即可。||If you change your mind, read the terms again and decide. If you do not want to use the Service, just leave.]]</p>
+    <div class="btns"><button type="button" class="btn btn-primary grow" data-act="reread">[[重新閱讀條款||Read the terms again]]</button><button type="button" class="btn btn-ghost grow" data-act="leave">[[離開（關閉此頁）||Leave (close this page)]]</button></div>
+  </section>
+</section>
+</template>
+
+<!-- ============ 工具（同意後才放進 DOM） ============ -->
+<template id="tpl-tool">
+<nav class="tabs" role="tablist" aria-label="設備 / Device">
+  <button type="button" role="tab" data-tab-btn="sensor" aria-selected="true">{{I usb}}<span><span class="l zh">人體感應器</span><span class="l en">Presence sensor</span><small><span class="l zh">USB 備份、更新、還原</span><span class="l en">USB backup, update, restore</span></small></span></button>
+  <button type="button" role="tab" data-tab-btn="s31" aria-selected="false">{{I wifi}}<span><span class="l zh">S31 智慧插座</span><span class="l en">S31 smart plug</span><small><span class="l zh">韌體尚未開放</span><span class="l en">Firmware not released yet</span></small></span></button>
+</nav>
+<!-- S31 日後解鎖版（教學＋下載）：只有 releases.json 有 s31 且 available:true 才會顯示；第一版不實作，一律顯示下面的「尚未開放」。 -->
+
+<div id="panel-sensor" role="tabpanel">
+
+<!-- 不支援的瀏覽器 -->
+<section class="screen" data-screen="unsupported">
+  <div class="note bad big">{{I warn}}<div>
+    <h3 tabindex="-1">[[這個瀏覽器沒辦法用 USB 刷寫感應器||This browser can't flash the sensor over USB]]</h3>
+    [[刷寫需要「Web Serial」功能，目前只有<b>電腦版 Chrome 或 Edge</b>支援。手機、平板、Safari 和 Firefox 都不行。請改用電腦打開這一頁。||Flashing needs the Web Serial API, which only <b>desktop Chrome or Edge</b> provide. Phones, tablets, Safari and Firefox are not supported. Please open this page on a computer.]]
+  </div></div>
+  <section class="card">
+    <h2>[[支援的環境||Supported environments]]</h2>
+    <div class="support">
+      <div class="ok">{{I check}}[[電腦版 Chrome 89 以上||Desktop Chrome 89+]]</div>
+      <div class="ok">{{I check}}[[電腦版 Edge 89 以上||Desktop Edge 89+]]</div>
+      <div class="no">{{I x}}[[手機與平板（iOS、Android）||Phones and tablets (iOS, Android)]]</div>
+      <div class="no">{{I x}}[[Safari、Firefox||Safari, Firefox]]</div>
+    </div>
+    <p class="hint" data-b-hint="https">[[網址必須是 https:// 開頭（或 localhost）。||The page must be served over https:// (or localhost).]]</p>
+    <div class="btns"><button type="button" class="btn btn-primary" data-act="copy-url">{{I copy}}[[複製本頁網址，到電腦貼上||Copy this page's link to open on a computer]]</button></div>
+    <p class="hint" data-b="copyDone" hidden></p>
+  </section>
+  <section class="card">
+    <h2>[[手機也能看的部分||What works on a phone]]</h2>
+    <p>[[「S31 智慧插座」分頁不需要 Web Serial，用手機或任何瀏覽器都能看（目前韌體尚未開放）。||The “S31 smart plug” tab does not need Web Serial and works on any browser, including phones (the firmware is not released yet).]]</p>
+    <div class="btns"><button type="button" class="btn btn-ghost" data-act="goto-s31">{{I wifi}}[[看 S31 智慧插座分頁||Open the S31 smart plug tab]]</button></div>
+  </section>
+</section>
+
+<!-- 未連線 -->
+<section class="screen" data-screen="idle">
+  {{STEPS 1}}
+  <div class="note bad" data-box="idleError" hidden role="alert">{{I x}}<div><b data-b="idleErrorTitle"></b><div data-b="idleErrorText"></div></div></div>
+  <section class="card">
+    <h2>[[① 連接感應器||1. Connect the sensor]]</h2>
+    <ol class="steplist">
+      <li>[[用<b>可傳資料</b>的 USB-C 線把感應器接上電腦（只能充電的線不行）。||Plug the sensor into your computer with a <b>data-capable</b> USB-C cable (charge-only cables won't work).]]</li>
+      <li>[[關閉其他會佔用序列埠的程式（Arduino IDE、ESPHome、其他分頁的刷機頁）。||Close anything else using the serial port (Arduino IDE, ESPHome, other flasher tabs).]]</li>
+      <li>[[按下「連接設備」，在瀏覽器彈出的清單選擇名稱含「USB JTAG/serial」的序列埠。||Press “Connect device” and pick the port named “USB JTAG/serial” in the browser prompt.]]</li>
+    </ol>
+    <div class="btns"><button type="button" class="btn btn-primary grow" data-act="connect">{{I usb}}[[連接設備||Connect device]]</button></div>
+    <p class="hint">[[連接只會讀取晶片資訊，不會改動設備上的任何東西。||Connecting only reads chip information; nothing on the device is changed.]]</p>
+  </section>
+  <p class="hint">[[刷寫前不用選型號：這一頁目前只支援人體感應器（ESP32-C3），連線後會自動辨識。||No model to pick: this page currently supports the presence sensor (ESP32-C3) only and recognises it after connecting.]]</p>
+</section>
+
+<!-- 已連線並辨識 -->
+<section class="screen" data-screen="identified">
+  {{STEPS 2}}
+  <div class="devbar"><span class="ico">{{I check}}</span>
+    <div class="tx"><b>[[已辨識：||Detected: ]]<span data-b="chip"></span></b><span>[[與預期的設備相符，可以繼續||Matches the expected device — you can continue]]</span></div>
+    <button type="button" class="btn btn-ghost btn-sm" data-act="disconnect">[[中斷連線||Disconnect]]</button></div>
+  <dl class="kv card" style="padding:var(--s4) var(--s5)">
+    <dt>[[晶片||Chip]]</dt><dd><span data-b="chip"></span> <span class="ok">· {{I check}} [[符合預期||as expected]]</span></dd>
+    <dt>MAC</dt><dd class="mono" data-b-html="macHtml"></dd>
+    <dt>[[Flash 容量||Flash size]]</dt><dd><span data-b="flashMb"></span> MB <span class="ok">· {{I check}} [[符合預期||as expected]]</span></dd>
+  </dl>
+  <section class="card">
+    <h2>[[② 先備份，再做其他事||2. Back up first, then continue]]</h2>
+    <p class="sub" data-b-box="needBackup">[[備份完成並成功存檔後，才會開放「更新」與「還原」。||“Update” and “Restore” unlock only after a backup has been saved.]]</p>
+    <p class="sub" data-b-box="haveBackup" hidden>[[這台設備的備份已存檔，「更新」與「還原」已解鎖。||This device's backup is saved; “Update” and “Restore” are unlocked.]]</p>
+  </section>
+  <article class="fn read">
+    <header><span class="ico">{{I eye}}</span><h3>[[備份韌體||Back up firmware]]</h3><span class="tag read">{{I eye}}[[唯讀 · 不會改動設備||Read-only · changes nothing]]</span></header>
+    <p>[[讀出整顆 4 MB flash，由設備端算 MD5 核對資料無誤，存成 .bin（資料）與 .json（晶片、MAC、校驗碼）。||Reads the whole 4 MB flash, checks the data against an MD5 computed on the device, and saves a .bin (data) and a .json (chip, MAC, checksum).]]</p>
+    <p class="hint">[[預估時間：||Estimated time: ]][[約 1～3 分鐘||about 1–3 minutes]]</p>
+    <div class="btns"><button type="button" class="btn btn-read grow" data-act="backup">{{I eye}}[[開始備份||Start backup]]</button></div>
+  </article>
+  <article class="fn write locked gatedfn" id="fnUpdate" aria-disabled="true">
+    <header><span class="ico">{{I pen}}</span><h3>[[更新韌體||Update firmware]]</h3><span class="tag write">{{I pen}}[[會寫入設備||Writes to device]]</span></header>
+    <p>[[寫入新版韌體。預設保留 Wi-Fi 設定與校準，不擦除。||Writes a new firmware version. Wi-Fi settings and calibration are kept by default.]]</p>
+    <p class="hint">[[日常更新建議用設備網頁上的 OTA（不用接線）；這裡適合首次安裝與救援。||For routine updates use the device's own OTA page (no cable). This tool is for first-time installs and rescue.]]</p>
+    <p class="hint" data-b-box="fwVersion" hidden>[[最新版本：||Latest version: ]]<b data-b="latestVer"></b></p>
+    <div class="lockmsg" data-role="locked">{{I lock}}[[先完成備份才能使用||Complete a backup first]]</div>
+    <div class="skipmsg" data-role="skipped" hidden>{{I warn}}[[已略過備份（風險自負）||Backup skipped (at your own risk)]]</div>
+    <div class="lockmsg" data-role="nofw" hidden>{{I lock}}[[韌體尚未開放||Firmware not released yet]]</div>
+    <div class="btns"><button type="button" class="btn btn-write grow" data-act="update" disabled>{{I pen}}[[更新…||Update…]]</button></div>
+  </article>
+  <article class="fn over locked gatedfn" id="fnRestore" aria-disabled="true">
+    <header><span class="ico">{{I restore}}</span><h3>[[還原備份||Restore a backup]]</h3><span class="tag over">{{I warn}}[[覆寫整顆 flash||Overwrites entire flash]]</span></header>
+    <p>[[選擇先前存的 .bin 與 .json，核對無誤後整顆寫回，並驗證。||Pick a saved .bin and .json; after checks the whole flash is written back and verified.]]</p>
+    <div class="lockmsg" data-role="locked">{{I lock}}[[先完成備份才能使用||Complete a backup first]]</div>
+    <div class="skipmsg" data-role="skipped" hidden>{{I warn}}[[已略過備份（風險自負）||Backup skipped (at your own risk)]]</div>
+    <div class="btns"><button type="button" class="btn btn-danger grow" data-act="restore" disabled>{{I restore}}[[還原…||Restore…]]</button></div>
+  </article>
+  <label class="opt adv skipbox" data-b-box="skipbox"><input type="checkbox" id="skipBk"><span class="t"><b>[[進階：我理解風險，略過備份||Advanced: I understand the risk, skip the backup]]</b>[[沒有備份就寫入，一旦寫壞或設定被覆蓋，Wi-Fi 設定、校準與歷史資料就永遠無法還原。只有在設備讀不出來、無法備份時才建議使用。勾選後，更新與還原會多一道確認，這個選擇也會記錄在操作紀錄裡。||Writing without a backup means that if the write fails or settings are overwritten, Wi-Fi settings, calibration and history can never be restored. Use it only when the device cannot be read and so cannot be backed up. Update and restore then need an extra confirmation, and the choice is recorded in the operation log.]]</span></label>
+</section>
+
+<!-- 辨識錯誤 -->
+<section class="screen" data-screen="id-error">
+  {{STEPS 1}}
+  <div class="note bad big" role="alert">{{I x}}<div>
+    <h3 tabindex="-1" data-b="idErrTitle"></h3>
+    [[這一頁只支援 ||This page supports only the ]]<b>[[人體感應器（ESP32-C3、4 MB flash）||presence sensor (ESP32-C3, 4 MB flash)]]</b>[[，但連上的是 ||, but the connected device is ]]<b data-b="detSummary"></b>[[。為了避免寫壞設備，備份、更新、還原全部停用。||. To avoid damaging a device, backup, update and restore are all disabled.]]
+  </div></div>
+  <dl class="kv card" style="padding:var(--s4) var(--s5)">
+    <dt>[[預期||Expected]]</dt><dd>ESP32-C3 · 4 MB flash</dd>
+    <dt>[[偵測到||Detected]]</dt><dd><span class="no" data-b="detSummary"></span></dd>
+    <dt>MAC</dt><dd class="mono" data-b="mac"></dd>
+  </dl>
+  <section class="card">
+    <h2>[[可以怎麼做||What you can do]]</h2>
+    <ul class="steplist" style="list-style:disc">
+      <li>[[確認接的是正確的設備，換一個序列埠重新連接。||Check that the right device is connected and pick a different serial port.]]</li>
+    </ul>
+    <div class="btns"><button type="button" class="btn btn-primary grow" data-act="reconnect">{{I usb}}[[換序列埠重新連接||Reconnect with another port]]</button></div>
+  </section>
+</section>
+
+<!-- 進行中（備份／更新／還原共用；階段與顏色由 app.mjs 依操作設定） -->
+<section class="screen" data-screen="running">
+  <div data-b-html="stepsHtml"></div>
+  <div class="lockbar read" id="lockbar" role="status">{{I eye}}<div><span data-b-html="lockText"></span><small data-b-html="lockSub"></small></div></div>
+  <section class="card">
+    <header style="display:flex;gap:var(--s3);align-items:center;flex-wrap:wrap"><h2 style="flex:1" tabindex="-1" data-b-html="runTitle"></h2><span class="tag read" id="runTag" data-b-html="runTag"></span></header>
+    <ul class="phases" id="phases"></ul>
+    <div class="progrow"><b data-b="pct">0%</b><span data-b="bytes"></span></div>
+    <div class="bar read" id="bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="[[進度||Progress]]"><i style="width:0%"></i></div>
+    <div class="progrow"><span data-b-html="speed"></span><span data-b-html="eta"></span></div>
+    <details class="log"><summary>[[詳細紀錄||Detailed log]]</summary><pre data-b="log"></pre></details>
+    <div class="btns"><button type="button" class="btn btn-ghost" data-act="cancel-run" id="cancelBtn">[[取消備份||Cancel backup]]</button></div>
+    <p class="hint" data-b="cancelNote" hidden></p>
+  </section>
+</section>
+
+<!-- 備份完成（先「待存檔」，存檔成功才解鎖） -->
+<section class="screen" data-screen="backup-done">
+  {{STEPS 2}}
+  <div class="note info big" data-box="presave">{{I info}}<div><h3 tabindex="-1">[[備份已讀完，還沒存到你的電腦||Backup read — not saved to your computer yet]]</h3>[[資料已核對無誤（設備端 MD5 一致），但<b>還沒存檔</b>，所以「更新」與「還原」仍然鎖著。請按下面的「存檔」，選擇存放位置。||The data was verified (the device's MD5 matched) but it is <b>not saved yet</b>, so “Update” and “Restore” stay locked. Press “Save” below and choose a location.]]</div></div>
+  <div class="note bad" data-box="saveError" hidden role="alert">{{I x}}<div><b data-b="saveErrorTitle"></b><div data-b="saveErrorText"></div></div></div>
+  <div class="note ok big" data-box="saved" hidden>{{I check}}<div><h3 tabindex="-1" data-b-html="savedTitle"></h3><span data-b-html="savedText"></span></div></div>
+  <div class="note warn" data-box="unverified" hidden>{{I warn}}<div><b>[[瀏覽器無法確認檔案是否真的存好||The browser cannot confirm the files were really saved]]</b><br>[[檔案是以「下載」方式存出的，已下載到你的「下載」資料夾。請打開資料夾確認 .bin 與 .json 都在，再按下面的按鈕解鎖。||The files were saved as downloads and went to your Downloads folder. Open it, check that both the .bin and the .json are there, then press the button below to unlock.]]<div class="btns" style="margin-top:var(--s2)"><button type="button" class="btn btn-ghost btn-sm" data-act="confirm-saved">{{I check}}[[我已確認檔案已存好||I have checked the files are saved]]</button></div></div></div>
+  <section class="card">
+    <h2>[[備份檔案||Backup files]]</h2>
+    <div class="files">
+      <div class="file"><span class="ico">{{I file}}</span><div class="nm"><span data-b="binName"></span><small>[[韌體資料 · ||Firmware data · ]]<span data-b="binBytes"></span> [[位元組||bytes]]</small></div><span class="tag off" data-b-tag="bin"></span></div>
+      <div class="file"><span class="ico">{{I file}}</span><div class="nm"><span data-b="jsonName"></span><small>[[晶片、MAC、flash 大小、校驗碼、讀取時間||Chip, MAC, flash size, checksum, read time]]</small></div><span class="tag off" data-b-tag="json"></span></div>
+    </div>
+    <p class="hint" data-b-box="savedWhere" hidden data-b-html="savedWhere"></p>
+    <h3>SHA-256</h3>
+    <div class="hash"><code data-b="sha"></code><button type="button" class="btn btn-ghost btn-sm" data-act="copy-sha" aria-label="複製 / Copy">{{I copy}}</button></div>
+    <div class="btns" data-box="saveBtns"><button type="button" class="btn btn-read grow" data-act="save-backup">{{I download}}[[存檔（選擇位置）||Save (choose a location)]]</button><button type="button" class="btn btn-ghost" data-act="discard-backup">[[不存了，回上一步||Don't save, go back]]</button></div>
+  </section>
+  <div class="note warn big">{{I warn}}<div><h3>[[這份備份含有機密，請妥善保管||This backup contains secrets — keep it safe]]</h3>
+    [[備份檔裡有這台設備的 <b>Wi-Fi 密碼</b>與 <b>API 加密金鑰</b>。<ul><li>不要分享給別人、不要上傳到網路或雲端相簿</li><li>不要放進公開的 GitHub</li><li>不再需要時請刪除</li></ul>||The files include this device's <b>Wi-Fi password</b> and <b>API encryption key</b>.<ul><li>Do not share them or upload them to the web or a photo cloud</li><li>Never put them in a public GitHub repo</li><li>Delete them when no longer needed</li></ul>]]
+  </div></div>
+  <section class="card" data-box="next" hidden>
+    <h2>[[下一步||What next]]</h2>
+    <div class="btns"><button type="button" class="btn btn-write grow" data-act="update" data-b-nofw="update">{{I pen}}[[更新韌體…||Update firmware…]]</button><button type="button" class="btn btn-danger grow" data-act="restore">{{I restore}}[[還原備份…||Restore a backup…]]</button><button type="button" class="btn btn-ghost grow" data-act="finish-backup">[[我只要備份，完成||Done — backup only]]</button></div>
+    <p class="hint" data-b-box="nofwHint" hidden>[[目前沒有可下載的韌體，所以「更新」停用；備份與還原不受影響。||No firmware is available to download right now, so “Update” is disabled; backup and restore are not affected.]]</p>
+  </section>
+</section>
+
+<!-- 更新確認 -->
+<section class="screen" data-screen="update-confirm">
+  {{STEPS 3}}
+  <section class="card gated">
+    <header style="display:flex;gap:var(--s3);align-items:center;flex-wrap:wrap"><h2 style="flex:1" tabindex="-1">[[更新韌體：確認||Update firmware: confirm]]</h2><span class="tag write">{{I pen}}[[會寫入設備||Writes to device]]</span></header>
+    <dl class="kv">
+      <dt>[[設備||Device]]</dt><dd>[[人體感應器||Presence sensor]] · <span data-b="chip"></span> · <span class="mono" data-b="mac"></span></dd>
+      <dt>[[將寫入的版本||Version to install]]</dt><dd>v<span data-b="ver"></span> <span class="sub" data-b="verDate"></span></dd>
+      <dt>[[檔案||File]]</dt><dd class="mono" data-b="fwFile"></dd>
+      <dt>[[備份||Backup]]</dt><dd data-b-html="bkState"></dd>
+    </dl>
+    <h3>[[寫入哪些內容||What gets written]]</h3>
+    <ul class="checks" data-b-box="keepList">
+      <li class="ok">{{I check}}<div>[[寫入：開機程式、分區表、主程式（設備上的設定區會被避開，不寫入）||Written: bootloader, partition table, application (the settings area on the device is skipped)]]</div></li>
+      <li class="ok">{{I check}}<div>[[預期保留：Wi-Fi 設定、校準、歷史統計；寫入前後會比對設定區的 MD5，不同就會報錯||Expected to be kept: Wi-Fi settings, calibration, history; the settings area's MD5 is compared before and after and any difference is reported]]</div></li>
+    </ul>
+    <ul class="checks" data-b-box="eraseList" hidden>
+      <li class="warn">{{I warn}}<div>[[整顆 flash 會先擦除再寫入：Wi-Fi 設定、校準與歷史統計都會消失||The entire flash is erased and rewritten: Wi-Fi settings, calibration and history are lost]]</div></li>
+    </ul>
+    <label class="opt adv"><input type="checkbox" id="eraseAll"><span class="t"><b>[[進階：全部擦除（全新安裝）||Advanced: erase everything (clean install)]]</b>[[Wi-Fi 設定與校準會全部消失，裝好後要重新設定。一般更新請不要勾。||Wi-Fi settings and calibration are lost; you must set them up again. Leave unticked for a normal update.]]</span></label>
+    <label class="opt"><input type="checkbox" class="req" id="reqUpd"><span class="t"><b>[[我了解寫入期間不能拔線、不能關閉這一頁||I understand I must not unplug or close this page while writing]]</b>[[中斷可能讓設備暫時無法開機（通常可以救回）。||An interruption can leave the device unable to boot (usually it can be rescued).]]</span></label>
+    <div class="btns"><button type="button" class="btn btn-ghost" data-act="back-main">[[返回||Back]]</button><button type="button" class="btn btn-write grow" data-act="to-op-confirm" disabled>{{I pen}}[[下一步：最後確認||Next: final check]]</button></div>
+  </section>
+</section>
+
+<!-- 操作層：最後確認（更新） -->
+<section class="screen" data-screen="op-confirm">
+  {{STEPS 3}}
+  <div class="note bad big">{{I warn}}<div>
+    <h3 tabindex="-1">[[最後確認：這會覆寫設備上的韌體||Final check: this overwrites the firmware on the device]]</h3>
+    [[寫入期間不能中斷。操作失敗或中斷，<b>可能造成設備無法使用</b>（通常還救得回來，但不保證）。||Writing cannot be interrupted. If it fails or is interrupted, <b>the device may become unusable</b> (usually it can be rescued, but this is not guaranteed).]]
+  </div></div>
+  <section class="card gated">
+    <h2>[[更新韌體 v||Update firmware to v]]<span data-b="ver"></span></h2>
+    <dl class="kv">
+      <dt>[[設備||Device]]</dt><dd class="mono" data-b-html="macHtml"></dd>
+      <dt>[[寫入範圍||Write range]]</dt><dd data-b-html="opRange"></dd>
+      <dt>[[備份||Backup]]</dt><dd data-b-html="bkState"></dd>
+    </dl>
+    <div class="note bad" data-box="skipNote" hidden>{{I warn}}<div>[[<b>你選擇略過備份。</b>寫壞或設定被覆蓋後，Wi-Fi 設定、校準與歷史資料無法還原。||<b>You chose to skip the backup.</b> If the write fails or settings are overwritten, Wi-Fi settings, calibration and history cannot be restored.]]</div></div>
+    <label class="opt" data-box="skipOpt" hidden><input type="checkbox" class="req" data-req="skip"><span class="t"><b>[[我沒有備份，並自行承擔因此造成的損失||I have no backup and accept any loss this causes]]</b>[[這個選擇會被記錄在操作紀錄裡。||This choice is recorded in the operation log.]]</span></label>
+    <label class="opt" data-box="eraseOpt" hidden><input type="checkbox" class="req" data-req="erase"><span class="t"><b>[[我了解整顆擦除會讓 Wi-Fi 設定與校準全部消失||I understand erasing everything removes all Wi-Fi settings and calibration]]</b></span></label>
+    <label class="opt"><input type="checkbox" class="req" data-req="main"><span class="t"><b>[[我了解這個操作會覆寫設備上的韌體，可能造成設備無法使用||I understand this overwrites the firmware on the device and may make it unusable]]</b>[[寫入期間不拔線、不關閉這一頁。||I will not unplug or close this page while writing.]]</span></label>
+    <div class="field"><label for="opMac">[[請輸入設備 MAC 的最後 4 碼來確認||Type the last 4 characters of the device's MAC to confirm]]</label><input type="text" id="opMac" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="····"><span class="hint">[[提示：就是上面那組 MAC 的最後 4 碼。||Hint: the last 4 characters of the MAC shown above.]]</span></div>
+    <div class="btns"><button type="button" class="btn btn-ghost" data-act="back-update-confirm">[[返回||Back]]</button><button type="button" class="btn btn-danger grow" data-act="start-update" disabled>{{I warn}}[[覆寫並開始更新||Overwrite and start the update]]</button></div>
+  </section>
+</section>
+
+<!-- 還原：選檔與驗證（驗證不過時同一頁顯示「檔案不適用」） -->
+<section class="screen" data-screen="restore-pick">
+  {{STEPS 3}}
+  <section class="card">
+    <header style="display:flex;gap:var(--s3);align-items:center;flex-wrap:wrap"><h2 style="flex:1" tabindex="-1">[[還原備份：選擇檔案||Restore a backup: choose files]]</h2><span class="tag over">{{I warn}}[[覆寫整顆 flash||Overwrites entire flash]]</span></header>
+    <p class="hint">[[請同時選擇備份的 .bin 與 .json 兩個檔案（檔案只在你的瀏覽器裡讀取，不會上傳）。||Choose both the backup .bin and .json (files are only read inside your browser, never uploaded).]]</p>
+    <div class="files">
+      <div class="file"><span class="ico">{{I file}}</span><div class="nm"><span data-b="pickBinName">—</span><small data-b-html="pickBinInfo">.bin</small></div><button type="button" class="btn btn-ghost btn-sm" data-act="pick-bin">[[選擇 .bin||Choose .bin]]</button></div>
+      <div class="file"><span class="ico">{{I file}}</span><div class="nm"><span data-b="pickJsonName">—</span><small>.json</small></div><button type="button" class="btn btn-ghost btn-sm" data-act="pick-json">[[選擇 .json||Choose .json]]</button></div>
+    </div>
+    <input type="file" id="fileBin" accept=".bin,application/octet-stream" hidden>
+    <input type="file" id="fileJson" accept=".json,application/json" hidden>
+    <div data-box="pickChecks" hidden>
+      <div class="note bad" data-box="pickBad" hidden role="alert">{{I x}}<div><b>[[這份備份不能用在目前的設備，已停用還原。||This backup can't be used on the connected device; restore is disabled.]]</b></div></div>
+      <h3>[[檢查結果||Check results]]</h3>
+      <ul class="checks" data-b-html="checksHtml"></ul>
+      <p class="hint" data-box="macHint" hidden>[[MAC 不同不是錯誤，但備份內含那台設備的 Wi-Fi 與金鑰，所以要多一道確認。||A different MAC is not an error, but the backup carries that device's Wi-Fi and keys, so it needs an extra confirmation.]]</p>
+    </div>
+    <div class="btns"><button type="button" class="btn btn-ghost" data-act="back-main">[[返回||Back]]</button><button type="button" class="btn btn-danger grow" data-act="to-restore-confirm" disabled>[[下一步：確認還原||Next: confirm restore]]</button></div>
+  </section>
+</section>
+
+<!-- 還原確認（操作層最後確認；不同台要輸入末 4 碼） -->
+<section class="screen" data-screen="restore-confirm">
+  {{STEPS 3}}
+  <div class="note bad big">{{I warn}}<div>
+    <h3 tabindex="-1">[[最後確認：這會覆蓋整顆 flash||Final check: this overwrites the entire flash]]</h3>
+    [[目前設備上的韌體、Wi-Fi 設定、校準與歷史資料會全部被這份備份取代，無法復原。寫入期間不能中斷，失敗可能造成設備無法使用（通常還救得回來，但不保證）。||Firmware, Wi-Fi settings, calibration and history on the device will all be replaced by this backup and cannot be undone. Writing cannot be interrupted, and a failure may leave the device unusable (usually it can be rescued, but this is not guaranteed).]]
+  </div></div>
+  <section class="card gated">
+    <h2 data-box="rcDiff" hidden>[[這份備份來自另一台設備||This backup is from a different device]]</h2>
+    <h2 data-box="rcSame" hidden>[[這份備份來自這台設備||This backup is from this device]]</h2>
+    <dl class="kv">
+      <dt>[[備份來源 MAC||Backup MAC]]</dt><dd class="mono" data-b="bkMac"></dd>
+      <dt>[[目前設備 MAC||Connected MAC]]</dt><dd class="mono" data-b-html="macHtml"></dd>
+      <dt>[[寫入範圍||Write range]]</dt><dd>0x000000–0x3FFFFF（4 MB）</dd>
+    </dl>
+    <ul class="checks" data-box="rcWarns" hidden>
+      <li class="warn">{{I warn}}<div>[[還原後，這台會帶著<b>備份那台的 Wi-Fi 密碼與 API 金鑰</b>。||After restoring, this device carries <b>the other device's Wi-Fi password and API key</b>.]]</div></li>
+      <li class="warn">{{I warn}}<div>[[兩台若同時上線，名稱、網路位址或在智慧家庭系統裡的實體可能重複。||If both devices go online together, their names, addresses or smart-home entities may collide.]]</div></li>
+    </ul>
+    <div class="note bad" data-box="skipNote" hidden>{{I warn}}<div>[[<b>你選擇略過備份。</b>覆寫後沒有辦法退回這台原本的內容。||<b>You chose to skip the backup.</b> After overwriting there is no way back to this device's previous contents.]]</div></div>
+    <label class="opt" data-box="skipOpt" hidden><input type="checkbox" class="req" data-req="skip"><span class="t"><b>[[我沒有備份，並自行承擔因此造成的損失||I have no backup and accept any loss this causes]]</b>[[這個選擇會被記錄在操作紀錄裡。||This choice is recorded in the operation log.]]</span></label>
+    <label class="opt"><input type="checkbox" class="req" data-req="main"><span class="t"><b data-box="rcDiff" hidden>[[我確定要用另一台的備份覆蓋這台||I'm sure I want to overwrite this device with another device's backup]]</b><b data-box="rcSame" hidden>[[我確定要用這份備份覆蓋整顆 flash||I'm sure I want to overwrite the entire flash with this backup]]</b>[[寫入期間不能拔線、不能關閉這一頁。||Do not unplug or close this page while writing.]]</span></label>
+    <div class="field" data-box="tailField" hidden><label for="resType">[[請輸入目前設備 MAC 的最後 4 碼來確認||Type the last 4 characters of the connected device's MAC to confirm]]</label><input type="text" id="resType" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="····"><span class="hint">[[提示：就是上面「目前設備 MAC」的最後 4 碼。||Hint: the last 4 characters of the “Connected MAC” above.]]</span></div>
+    <div class="btns"><button type="button" class="btn btn-ghost" data-act="back-restore-pick">[[返回||Back]]</button><button type="button" class="btn btn-danger grow" data-act="start-restore" disabled>{{I restore}}[[覆寫並開始還原||Overwrite and start restore]]</button></div>
+  </section>
+</section>
+
+<!-- 成功 -->
+<section class="screen" data-screen="success">
+  {{STEPS 3}}
+  <div class="note ok big">{{I check}}<div><h3 tabindex="-1" data-b-html="okTitle"></h3>[[寫入內容已通過 MD5 驗證。||The written data passed MD5 verification.]]</div></div>
+  <div class="note warn" data-box="resetFailed" hidden>{{I warn}}<div><b>[[自動重新啟動沒有成功||The automatic restart did not work]]</b><br>[[寫入與驗證都已完成。請拔掉 USB 線再插回，讓設備重新啟動。||Writing and verification finished. Unplug the USB cable and plug it back in to restart the device.]]</div></div>
+  <section class="card">
+    <ul class="checks">
+      <li class="ok">{{I check}}<div>[[寫入完成||Write complete]]</div></li>
+      <li class="ok">{{I check}}<div data-b-html="okVerify"></div></li>
+      <li class="ok" data-box="okRestarted">{{I check}}<div>[[設備已重新啟動||Device restarted]]</div></li>
+      <li class="ok" data-box="okKept" hidden>{{I check}}<div>[[設定區（NVS）的 MD5 寫入前後相同||The settings area (NVS) has the same MD5 before and after]]</div></li>
+    </ul>
+    <h2>[[接下來||Next steps]]</h2>
+    <ol class="steplist">
+      <li>[[等約 30 秒，感應器會連上 Wi-Fi。||Wait about 30 seconds for the sensor to join Wi-Fi.]]</li>
+      <li>[[在你的路由器或智慧家庭系統找到它，打開它的網頁完成設定。||Find it in your router or smart-home app and open its web page to finish setup.]]</li>
+      <li data-box="afterErase" hidden>[[剛才選了「全部擦除」，Wi-Fi 設定已清除，需要重新設定。||You chose “erase everything”, so the Wi-Fi settings were cleared and must be set up again.]]</li>
+    </ol>
+    <div class="btns"><button type="button" class="btn btn-primary grow" data-act="finish">[[完成||Finish]]</button></div>
+  </section>
+</section>
+
+<!-- 失敗與救援 -->
+<section class="screen" data-screen="failure">
+  {{STEPS 3}}
+  <div class="note bad big" role="alert">{{I x}}<div>
+    <h3 tabindex="-1" data-b-html="failTitle"></h3>
+    <span class="mono" data-b="failCode"></span><br>
+    <span data-b-html="failText"></span>
+    <div data-box="failPartial" hidden>[[別擔心，這台設備<b>很可能還救得回來</b>：晶片內建的下載模式不會被刷壞。你電腦裡的備份檔也沒有受影響。<b>請不要拔線，先看下面的救援步驟。</b>||Don't worry — the device can <b>very likely be rescued</b>: the chip's built-in download mode can't be broken by flashing. Your backup files are unaffected. <b>Do not unplug yet; follow the rescue steps below.</b>]]</div>
+    <div data-box="failClean" hidden>[[設備上的內容<b>沒有被改動</b>（寫入還沒開始）。||Nothing on the device was changed (writing had not started).]]</div>
+  </div></div>
+  <section class="card" data-box="rescue" hidden>
+    <h2>[[救援步驟||Rescue steps]]</h2>
+    <ol class="steplist">
+      <li>[[先試著按下面的「重新連接」，重新選擇序列埠；連得上的話可以直接再試一次「更新」或用備份「還原」。||First try “Reconnect” below and pick the serial port again; if it connects you can simply retry “Update” or “Restore” your backup.]]</li>
+      <li>[[連不上時，拔掉 USB 線。||If it won't connect, unplug the USB cable.]]</li>
+      <li>[[<b>按住感應器上的 BOOT 鈕</b>不放。||<b>Press and hold the BOOT button</b> on the sensor.]]</li>
+      <li>[[按住的同時把 USB 線插回電腦，約 2 秒後放開 BOOT。||While holding it, plug the USB cable back in, then release BOOT after about 2 seconds.]]</li>
+      <li>[[再按「重新連接」，重新選擇序列埠。||Press “Reconnect” again and pick the serial port.]]</li>
+    </ol>
+  </section>
+  <section class="card">
+    <div class="btns"><button type="button" class="btn btn-primary grow" data-act="reconnect">{{I usb}}[[重新連接||Reconnect]]</button><button type="button" class="btn btn-ghost grow" data-act="copy-report">{{I copy}}[[複製錯誤報告（不會上傳）||Copy error report (not uploaded)]]</button></div>
+    <p class="hint" data-b="copyDone" hidden></p>
+  </section>
+</section>
+
+</div><!-- /panel-sensor -->
+
+<div id="panel-s31" role="tabpanel" hidden>
+<!-- S31：第一版只顯示「韌體尚未開放」（沒有下載、沒有教學步驟） -->
+<section class="screen" data-screen="s31-unavailable">
+  <div class="note info big">{{I lock}}<div>
+    <h3 tabindex="-1">[[S31 智慧插座的韌體尚未開放||The S31 smart plug firmware is not released yet]]</h3>
+    [[這個分頁暫時沒有韌體可以下載，也沒有更新教學。開放後會在這裡提供。||There is no firmware to download and no update guide on this tab for now. It will be provided here once released.]]
+  </div></div>
+  <section class="card">
+    <header class="cardhead"><h2>[[韌體||Firmware]]</h2><span class="tag off">{{I lock}}[[尚未開放||Not released yet]]</span></header>
+    <dl class="kv"><dt>[[版本||Version]]</dt><dd>—</dd><dt>[[檔案||File]]</dt><dd>—</dd></dl>
+    <div class="btns"><button type="button" class="btn btn-primary grow" disabled tabindex="-1">{{I download}}[[韌體尚未開放||Firmware not released yet]]</button></div>
+  </section>
+  <p class="hint">[[人體感應器的備份、更新、還原不受影響，請切換到「人體感應器」分頁。||The presence sensor's backup, update and restore are not affected; switch to the “Presence sensor” tab.]]</p>
+</section>
+</div>
+
+<!-- 條款與免責聲明（同意後由頁尾連結開啟） -->
+<section class="screen" data-screen="terms-view" id="scr-terms-view" hidden>
+  <div class="btns"><button type="button" class="btn btn-ghost btn-sm" data-act="close-terms">{{I back}}[[關閉條款，回到工具||Close terms and return to the tool]]</button></div>
+  <section class="card">
+    <header class="cardhead"><h2 tabindex="-1">[[使用條款與免責聲明||Terms of use and disclaimer]]</h2><span class="tag off">[[條款版本||Terms version]] <span data-b="termsVersion"></span></span></header>
+    <dl class="kv"><dt>[[你同意的版本||Version you accepted]]</dt><dd><span data-b="acceptedVer"></span> · <span data-b="acceptedAt"></span></dd><dt>[[紀錄存放處||Record stored in]]</dt><dd data-b-html="recordWhere"></dd></dl>
+    <div class="terms open"><ol class="terms-list" id="termsListView"></ol></div>
+    <div class="btns"><button type="button" class="btn btn-ghost" data-act="dl-consent">{{I download}}[[下載我的同意紀錄||Download my consent record]]</button></div>
+  </section>
+</section>
+</template>
+
+<script type="module" src="./app.mjs"></script>
+</body>
+</html>

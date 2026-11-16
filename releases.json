@@ -1,0 +1,35 @@
+[
+  {
+    "device": "presence",
+    "version": "3.0",
+    "kind": "factory",
+    "file": null,
+    "size": null,
+    "sha256": null,
+    "available": false,
+    "source_sha256": "12710bbcb5db3c482bea8dae7d7a7064347a9618ef939f5540347583c9a75bb9",
+    "terms_version": "v0.1"
+  },
+  {
+    "device": "presence",
+    "version": "3.0",
+    "kind": "ota",
+    "file": null,
+    "size": null,
+    "sha256": null,
+    "available": false,
+    "source_sha256": "12710bbcb5db3c482bea8dae7d7a7064347a9618ef939f5540347583c9a75bb9",
+    "terms_version": "v0.1"
+  },
+  {
+    "device": "s31",
+    "version": null,
+    "kind": "ota",
+    "file": null,
+    "size": null,
+    "sha256": null,
+    "available": false,
+    "source_sha256": "12710bbcb5db3c482bea8dae7d7a7064347a9618ef939f5540347583c9a75bb9",
+    "terms_version": "v0.1"
+  }
+]

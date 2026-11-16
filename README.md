@@ -2,30 +2,58 @@
 
 ## 繁體中文
 
-線上刷韌體網頁與教學：
+公開的線上韌體工具：在瀏覽器裡**備份、更新、還原**裝置韌體。
 
-1. **人體感應器（ESP32-C3）**：USB 直連，在瀏覽器裡直接**備份、更新、還原**韌體。
-2. **S31 插座**：OTA 更新教學與韌體下載（韌體暫未開放）。
+網址：<https://derliang.github.io/device-flasher/>
 
-**目前狀態：建置中。**
+**支援的裝置**
 
-- 感應器需求：電腦版 Chrome 或 Edge（需支援 Web Serial），以及 USB 連線
-- 全部在你的瀏覽器本機執行，**不會上傳任何資料**
-- ⚠️ 備份檔可能含有 Wi-Fi 密碼與金鑰，**請勿分享給他人**
+- **人體感應器（ESP32-C3）**：USB 直連，使用 Web Serial，可備份、更新、還原韌體。
+  需要桌面版 Chrome 或 Edge，並以 https 或 localhost 開啟頁面。
+- **S31 智慧插座**：韌體尚未開放。
+
+**目前狀態**：韌體 bin 尚未提供。
+
+**隱私與安全**
+
+- 檔案只在你的瀏覽器本機處理，**不會上傳**。
+- 備份檔可能含有 Wi-Fi 密碼與金鑰，**請勿分享給他人**。
+- 使用前須同意使用條款與免責聲明（[TERMS.md](TERMS.md)、[DISCLAIMER.md](DISCLAIMER.md)，版本 v0.1）。
+
+**授權**
+
+- 網頁程式：MIT（見 [LICENSE](LICENSE)）。
+- `esphome/`（去識別化的韌體原始碼）：GPL-3.0，見 [esphome/LICENSE](esphome/LICENSE) 與 [esphome/NOTICE.md](esphome/NOTICE.md)。
+- `vendor/` 內的 esptool-js 0.5.4：Apache-2.0。
+- 第三方細節見 [NOTICE.md](NOTICE.md)。
+
+**回報問題**：請使用本 repo 的 Issues。請勿在 Issues 貼上備份檔、Wi-Fi 密碼或金鑰。
 
 ## English
 
-A web page and guide for:
+A public online firmware tool: **back up, update and restore** device firmware right in your browser.
 
-1. **Presence sensor (ESP32-C3)**: direct USB, **back up, update and restore** firmware right from your browser.
-2. **S31 smart plug**: OTA update guide and firmware download (firmware not yet available).
+URL: <https://derliang.github.io/device-flasher/>
 
-**Status: under construction.**
+**Supported devices**
 
-- Sensor requirements: desktop Chrome or Edge (Web Serial support) and a USB connection
-- Everything runs locally in your browser; **nothing is uploaded**
-- ⚠️ Backup files may contain Wi-Fi passwords and keys. **Do not share them.**
+- **Presence sensor (ESP32-C3)**: direct USB via Web Serial; back up, update and restore firmware.
+  Requires desktop Chrome or Edge, with the page opened over https or localhost.
+- **S31 smart plug**: firmware not yet available.
 
-## License
+**Current status**: firmware binaries are not provided yet.
 
-Web page code: MIT (see [LICENSE](LICENSE)). Third-party components: see [NOTICE.md](NOTICE.md).
+**Privacy and safety**
+
+- Files are processed locally in your browser and are **never uploaded**.
+- Backup files may contain Wi-Fi passwords and keys. **Do not share them.**
+- You must accept the terms of use and disclaimer before use ([TERMS.md](TERMS.md), [DISCLAIMER.md](DISCLAIMER.md), version v0.1).
+
+**Licenses**
+
+- Web page code: MIT (see [LICENSE](LICENSE)).
+- `esphome/` (de-identified firmware source): GPL-3.0, see [esphome/LICENSE](esphome/LICENSE) and [esphome/NOTICE.md](esphome/NOTICE.md).
+- esptool-js 0.5.4 under `vendor/`: Apache-2.0.
+- Third-party details: [NOTICE.md](NOTICE.md).
+
+**Reporting problems**: please use this repository's Issues. Do not post backup files, Wi-Fi passwords or keys in Issues.

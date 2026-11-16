@@ -1,0 +1,3815 @@
+# HLK LD2410B 人體感應器（ESP32-C3）自管韌體：共用主體。
+# 本檔由 presence-product.yaml（產品版，名稱加 MAC 尾碼）或 presence-device.example.yaml（單台設定範例）以 packages 引入；
+# 各台的主檔只放 substitutions（devicename、upper_devicename、device_label）。
+#
+# 主要功能：
+#   - 雷達全部可調項做成實體：各格能量、各格門檻、無人逾時、最遠距離格、解析度、光感功能、工程模式。
+#   - 底噪校準在裝置端做：空房取樣各格能量，最大值加餘裕寫回門檻；另有原廠校準（按鈕 Radar Factory Calibrate）與雙點校準
+#     （空房取樣後坐回平常位置取第二點）。
+#   - 歷史學習（History Learning）：工程模式開著時把各格能量記成分布，定期算建議門檻，可套用、復原、重設，也可設定自動套用。
+#   - 智慧延時（Smart Delay）與有人狀態機（Empty／Entering／Moving／Still／Leaving）：每個狀態用不同逾時；
+#     離開殘留過濾、進入遲滯；Presence Reason 說明目前為什麼判定有人。
+#   - 雷達斷線偵測與自動恢復（Radar Link）、雷達參數讀回防呆（開機與斷線恢復後自動重讀）。
+#   - 區域輸出（Zone 1／2 起訖格）、離開區、空房底噪漂移監看。
+#   - 蜂鳴器、整點報時、燈珠預設全關，網頁與 Home Assistant 都能開。
+#   - 溫濕度補償做成可調數字（預設 0）。
+#   - 日誌走 USB-Serial/JTAG（GPIO20/21 同時是預設日誌腳與雷達腳）。
+#   - 內建繁體中文網頁介面（presence-web.js，編譯時包進韌體；網址加 ?native 回到 ESPHome 原始介面），含七步調校精靈。
+#   - 不含任何 Wi-Fi 帳密、API 加密金鑰或 OTA 密碼：Wi-Fi 在裝置上設定（improv／熱點配網）；API 先接受明文，
+#     Home Assistant 連上後可自行產生金鑰（要清掉只能恢復出廠）。
+#   - 雷達自帶藍牙開關（指令 00A4）只放進階：網頁收在「進階（小心）」並二次確認；關掉後只能斷電再上電 5 次以上才能重開。
+#
+# 自訂 ld2410 元件在 components/ld2410（修改自 ESPHome 2026.10.1，見 NOTICE.md）。
+
+substitutions:
+  firmware_version: "4.3.2"
+  # 3.3：網頁版本（必須等於 presence-web.js 的 WEB_VERSION）
+  web_version: "4.25"
+  # 3.7 去重：九格／十八格的實體清單與距離解析度，原本在 lambda 裡複製貼上 11＋5 處；改成文字取代，產生的 C++ 完全相同
+  # （ESPHome 會在編譯前把 ${名稱} 換成這裡的文字，lambda 裡也有效）
+  gates_energy_still_9_state: "id(g0_still_energy).state, id(g1_still_energy).state, id(g2_still_energy).state, id(g3_still_energy).state, id(g4_still_energy).state, id(g5_still_energy).state, id(g6_still_energy).state, id(g7_still_energy).state, id(g8_still_energy).state"
+  gates_energy_all_18: "id(g0_move_energy), id(g0_still_energy), id(g1_move_energy), id(g1_still_energy), id(g2_move_energy), id(g2_still_energy), id(g3_move_energy), id(g3_still_energy), id(g4_move_energy), id(g4_still_energy), id(g5_move_energy), id(g5_still_energy), id(g6_move_energy), id(g6_still_energy), id(g7_move_energy), id(g7_still_energy), id(g8_move_energy), id(g8_still_energy)"
+  gates_thr_move_9: "id(g0_move_threshold), id(g1_move_threshold), id(g2_move_threshold), id(g3_move_threshold), id(g4_move_threshold), id(g5_move_threshold), id(g6_move_threshold), id(g7_move_threshold), id(g8_move_threshold)"
+  gates_thr_still_9: "id(g0_still_threshold), id(g1_still_threshold), id(g2_still_threshold), id(g3_still_threshold), id(g4_still_threshold), id(g5_still_threshold), id(g6_still_threshold), id(g7_still_threshold), id(g8_still_threshold)"
+  gates_thr_all_18: "id(g0_move_threshold), id(g0_still_threshold), id(g1_move_threshold), id(g1_still_threshold), id(g2_move_threshold), id(g2_still_threshold), id(g3_move_threshold), id(g3_still_threshold), id(g4_move_threshold), id(g4_still_threshold), id(g5_move_threshold), id(g5_still_threshold), id(g6_move_threshold), id(g6_still_threshold), id(g7_move_threshold), id(g7_still_threshold), id(g8_move_threshold), id(g8_still_threshold)"
+  gates_energy_still_9: "id(g0_still_energy), id(g1_still_energy), id(g2_still_energy), id(g3_still_energy), id(g4_still_energy), id(g5_still_energy), id(g6_still_energy), id(g7_still_energy), id(g8_still_energy)"
+  radar_res_m: '(strcmp(id(radar_res).current_option().c_str(), "0.2m") == 0) ? 20.0f : 75.0f'
+  # 時區（整點報時與智慧延時的時間判斷用）；預設台北時區，請在各台設定檔以 substitutions 覆寫成自己的時區，例如 Europe/Berlin
+  timezone: "Asia/Taipei"
+  # 產品版設 "true"：名稱加 MAC 尾碼，多台不撞名
+  mac_suffix: "false"
+  # 3.4：溫濕度補償預設 0（通用版）；需要時由各台設定檔以 substitutions 覆寫
+  temp_offset_default: "0"
+  humi_offset_default: "0"
+  comment: HLK LD2410B presence sensor
+
+esphome:
+  name: $devicename
+  friendly_name: $upper_devicename
+  name_add_mac_suffix: ${mac_suffix}
+  comment: $comment
+  # 3.0: history histograms live in RAM; the flash copies are restored here
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          memcpy(id(hq), id(hq_save), sizeof(id(hq)));
+          memcpy(id(ho), id(ho_save), sizeof(id(ho)));
+      # 3.3：機器讀的固定值與初始狀態（HA 磚、網頁用）
+      - lambda: |-
+          id(web_version_ts).publish_state("${web_version}");
+          id(capabilities_ts).publish_state("{\"gates\":9,\"max_gate_min\":2,\"max_gate_max\":8,\"resolutions\":[\"0.75m\",\"0.2m\"],\"still_threshold_fixed_gates\":[0,1]}");
+          id(cal_phase_ts).publish_state("idle");
+          id(eng_owner_ts).publish_state("off");
+          id(smart_mode_ts).publish_state(id(smart_delay).state ? "normal" : "off");
+          id(restore_status_ts).publish_state("idle");
+      # 3.4 穩健性：開機時檢查可調數字（含快閃還原的值）。空值或超出範圍就回預設，並記在 Config Check。
+      # 預設值要和各實體的 initial_value 與 restore_settings 一致
+      - lambda: |-
+          int bad = 0;
+          for (auto &d : std::vector<std::pair<number::Number *, float>>{
+              {id(floor_wait_s), 60}, {id(floor_window), 180}, {id(floor_every_min), 30}, {id(occ_every_min), 60}, {id(pir_recent_s), 300},
+              {id(hist_start_s), 180}, {id(hist_quiet_s), 600}, {id(hist_apply_days), 7}, {id(hist_clamp_step), 10}, {id(hist_min_q), 20000},
+              {id(hist_min_occ), 300}, {id(hist_pct_empty), 99.9f}, {id(hist_pct_occ), 10}, {id(seat_gap), 2}, {id(cal_abort_wait_s), 5},
+              {id(cal_abort_energy), 90}, {id(cal_abort_s), 1}, {id(cal_sit_wait_s), 90}, {id(cal_sit_confirm_s), 3}, {id(cal_verify_s), 3},
+              {id(residue_window), 10}, {id(pir_hold_s), 5}, {id(smart_write_gap_s), 30}, {id(settle_s), 12}, {id(pir_mismatch_s), 3},
+              {id(cal_spread_limit), 20}, {id(intf_ratio), 2.5f}, {id(intf_gap), 10},
+              {id(residue_drop), 0}, {id(residue_max_e), 35}, {id(residue_rebound), 5}, {id(residue_confirm_s), 4}, {id(residue_max_s), 60}, {id(entering_s), 10},
+              {id(zone_hold_s), 4}, {id(state_smooth_s), 3}, {id(cal_abort_spread), 40}, {id(entry_confirm_s), 2}, {id(bridge_e), 60}, {id(bridge_s), 60}, {id(led_brightness), 30}, {id(lost_hold_s), 180}, {id(energy_pres), 30},
+              {id(exit_near), 0}, {id(exit_far), 0}, {id(exit_win_s), 0}, {id(exit_e), 15}}) {
+            float v = d.first->state, lo = d.first->traits.get_min_value(), hi = d.first->traits.get_max_value();
+            if (std::isnan(v) || v < lo || v > hi) {
+              ESP_LOGW("config", "%s = %.2f is invalid, reset to %.2f", d.first->get_name().c_str(), v, d.second);
+              auto c = d.first->make_call(); c.set_value(d.second); c.perform(); bad++;
+            }
+          }
+          char b[48];
+          if (bad == 0) snprintf(b, sizeof(b), "ok");
+          else snprintf(b, sizeof(b), "reset %d invalid value(s) to default", bad);
+          id(config_check_ts).publish_state(b);
+      # 4.3.1：開機後確認雷達參數（最大格數、門檻）有讀回，沒讀回就自動重讀（見 script ensure_params）
+      - script.execute: ensure_params
+      - delay: 60s
+      - script.execute: hist_compute
+  project:
+    name: "community.PresencePlus"
+    version: ${firmware_version}
+  min_version: "2026.10.0"
+
+esp32:
+  variant: esp32c3
+  flash_size: 4MB
+  framework:
+    type: esp-idf
+
+preferences:
+  flash_write_interval: 30s
+
+# GPIO20/21 是雷達 UART，日誌必須走 USB（原生 USB-Serial/JTAG）
+logger:
+  level: INFO
+  hardware_uart: USB_SERIAL_JTAG
+
+api:
+  reboot_timeout: 0s
+  # 不寫金鑰：先接受明文，HA 連上後可自己產生金鑰寫入。要清掉金鑰只能恢復出廠
+  encryption: {}
+
+ota:
+  - platform: esphome
+  - platform: web_server
+
+safe_mode:
+  boot_is_good_after: 1min
+  num_attempts: 10
+
+# 不寫 SSID：帳密存在裝置裡。沒存過時開機就開熱點；有存過時斷線 5 分鐘才開，連回後自動關閉
+wifi:
+  min_auth_mode: WPA2
+  ap:
+    ap_timeout: 5min
+  power_save_mode: NONE
+  reboot_timeout: 1h
+  on_connect:
+    then:
+      - if:
+          condition:
+            switch.is_on: sounds
+          then:
+            - rtttl.play: "wifi:d=16,o=6,b=200:e,p,e"
+      - if:
+          condition:
+            lambda: 'return id(led_status).state && !id(cal_running);'
+          then:
+            - light.turn_off: ws2812
+            - script.execute: led_sync
+
+interval:
+  # 2.8: radar link watchdog. No data frame for N seconds -> link down + auto recovery (presence is NOT invalidated: ESPHome would not re-publish it after recovery).
+  - interval: 2s
+    then:
+      - lambda: |-
+          bool ok = id(ld2410_hub)->get_frame_age_ms() < (uint32_t) (id(radar_link_timeout).state * 1000);
+          if (!id(radar_link).has_state() || id(radar_link).state != ok) id(radar_link).publish_state(ok);
+          if (!ok && id(link_was_ok)) {
+            id(link_drops)++;
+          }
+          id(link_was_ok) = ok;
+      - if:
+          condition:
+            lambda: 'return !id(link_was_ok) && !id(cal_running);'
+          then:
+            - script.execute: link_recover
+  - interval: 10s
+    then:
+      - lambda: 'id(low_mem_bs).publish_state(esp_get_free_heap_size() < 80000);'
+      - lambda: |-
+          if (id(presence).state || !id(ld2410_engineering).state) { id(empty_since) = 0; return; }
+          if (id(empty_since) == 0) { id(empty_since) = millis(); return; }
+          if (millis() - id(empty_since) < (uint32_t) (id(floor_wait_s).state * 1000.0f)) return;
+          float v[9] = {${gates_energy_still_9_state}};
+          float sum = 0; int n = 0;
+          for (float x : v) { if (!std::isnan(x)) { sum += x; n++; } }
+          if (n == 0) return;
+          float lvl = sum / n;
+          float a = std::max(1.0f / std::max(1.0f, id(floor_window).state), 1.0f / (id(floor_n) + 1));
+          if (id(floor_n) == 0) id(floor_level) = lvl; else id(floor_level) += a * (lvl - id(floor_level));
+          id(floor_n)++;
+          if (id(floor_ref) < 0 && id(floor_n) >= (int) id(floor_window).state) id(floor_ref) = id(floor_level);
+  # 2.6: floor drift needs engineering mode, which auto-offs; open it for one sampling window every 30 min while the room is empty
+  - interval: 60s
+    then:
+      - if:
+          condition:
+            lambda: 'return !id(presence).state && !id(cal_running) && (millis() / 60000) % std::max((uint32_t) 1, (uint32_t) id(floor_every_min).state) == 5 && !id(ld2410_engineering).state;'
+          then:
+            - lambda: 'id(eng_owner_next) = 3;'
+            - switch.turn_on: ld2410_engineering
+  # 3.0: collect "person present" energies: open one engineering window per hour while a PIR-confirmed person is in
+  - interval: 60s
+    then:
+      - if:
+          condition:
+            lambda: |-
+              uint32_t now = millis();
+              return id(hist_learn).state && id(presence).state && !id(cal_running) && !id(ld2410_engineering).state &&
+                     id(hist_pir_ms) != 0 && now - id(hist_pir_ms) < (uint32_t) (id(pir_recent_s).state * 1000.0f) &&
+                     (id(hist_occ_eng_ms) == 0 || now - id(hist_occ_eng_ms) >= (uint32_t) (id(occ_every_min).state * 60000.0f));
+          then:
+            - lambda: 'id(hist_occ_eng_ms) = millis(); id(eng_owner_next) = 4;'
+            - switch.turn_on: ld2410_engineering
+  # 3.0 history learning: one sample per second while engineering mode is on
+  - interval: 1s
+    then:
+      - lambda: |-
+          uint32_t now = millis();
+          if (id(presence).state || id(motion).state) id(hist_busy_ms) = now;
+          if (id(motion).state) id(hist_pir_ms) = now;
+          if (!id(hist_learn).state || id(cal_running) || !id(ld2410_engineering).state || now < (uint32_t) (id(hist_start_s).state * 1000.0f)) return;
+          sensor::Sensor *e[18] = {${gates_energy_all_18}};
+          auto add = [](uint16_t *row, float v) {
+            if (std::isnan(v)) return;
+            int b = std::max(0, std::min(100, (int) lroundf(v)));
+            if (row[b] >= 65000) for (int i = 0; i < 101; i++) row[i] >>= 1;
+            row[b]++;
+          };
+          bool quiet = !id(presence).state && !id(motion).state && id(hist_busy_ms) != 0 && now - id(hist_busy_ms) >= (uint32_t) (id(hist_quiet_s).state * 1000.0f);
+          if (quiet) {
+            for (int k = 0; k < 18; k++) add(&id(hq)[k * 101], e[k]->state);
+            return;
+          }
+          if (!id(presence).state || id(hist_pir_ms) == 0 || now - id(hist_pir_ms) > (uint32_t) (id(pir_recent_s).state * 1000.0f)) return;
+          float res = ${radar_res_m};
+          float sd = id(radar_still_dist).state, md = id(radar_move_dist).state;
+          if (!std::isnan(sd) && sd > 0) { int g = (int) (sd / res); if (g <= 8) add(&id(ho)[(2 * g + 1) * 101], e[2 * g + 1]->state); }
+          if (!std::isnan(md) && md > 0) { int g = (int) (md / res); if (g <= 8) add(&id(ho)[(2 * g) * 101], e[2 * g]->state); }
+  - interval: 10min
+    then:
+      - script.execute: hist_compute
+      - script.wait: hist_compute
+      - if:
+          condition:
+            lambda: |-
+              if (!id(hist_auto).state || !id(hist_ready) || id(hist_changes) == 0 || id(cal_running)) return false;
+              if (id(presence).state || id(motion).state || millis() - id(hist_busy_ms) < (uint32_t) (id(hist_quiet_s).state * 1000.0f)) return false;
+              auto t = id(sntp_time).now();
+              if (!t.is_valid()) return false;
+              return id(hist_last_apply) == 0 || (uint32_t) t.timestamp - id(hist_last_apply) >= (uint32_t) (id(hist_apply_days).state * 86400.0f);
+          then:
+            - lambda: 'id(hist_clamp) = true;'
+            - script.execute: hist_apply
+  - interval: 60min
+    then:
+      - lambda: |-
+          memcpy(id(hq_save), id(hq), sizeof(id(hq)));
+          memcpy(id(ho_save), id(ho), sizeof(id(ho)));
+  # 2.9: 1 s so a walk to the door (2-3 s of far readings) is caught; the lambda is cheap
+  - interval: 1s
+    then:
+      - script.execute: smart_delay_tick
+      # 3.8：區輸出保持時間到了就放開（zone_eval 只在輸入變動時才跑）
+      - lambda: |-
+          uint32_t now = millis();
+          uint32_t hold = (uint32_t) (std::max(0.0f, id(zone_hold_s).state) * 1000.0f);
+          binary_sensor::BinarySensor *zo[2] = {id(zone1_occupied), id(zone2_occupied)};
+          for (int i = 0; i < 2; i++)
+            if (!id(zone_raw)[i] && zo[i]->state && now - id(zone_last)[i] >= hold) zo[i]->publish_state(false);
+  # Wi-Fi 斷線時（狀態燈開啟才作用）整排紅色閃爍
+  - interval: 10s
+    then:
+      - if:
+          condition:
+            and:
+              - switch.is_on: led_status
+              - not:
+                  wifi.connected:
+          then:
+            - light.turn_on:
+                id: ws2812
+                brightness: !lambda 'return id(led_brightness).state / 100.0f;'
+                red: 100%
+                green: 0%
+                blue: 0%
+                effect: "Alert Blink"
+
+captive_portal:
+
+mdns:
+  disabled: false
+
+debug:
+  update_interval: 60s
+
+web_server:
+  port: 80
+  include_internal: true
+  version: 3
+  # 自製網頁，網址加 ?native 回原始介面
+  js_url: ""
+  js_include: presence-web.min.js
+
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: ${timezone}
+    on_time:
+      - seconds: 0
+        minutes: 0
+        then:
+          - if:
+              condition:
+                switch.is_on: hourly_chime
+              then:
+                - rtttl.play: "chime2:d=16,o=6,b=140:c,p,c"
+      - seconds: 0
+        minutes: 30
+        then:
+          - if:
+              condition:
+                switch.is_on: hourly_chime
+              then:
+                - rtttl.play: "chime1:d=16,o=6,b=140:c"
+
+uart:
+  tx_pin: GPIO21
+  rx_pin: GPIO20
+  baud_rate: 256000
+  parity: NONE
+  stop_bits: 1
+
+i2c:
+  sda: GPIO2
+  scl: GPIO1
+  scan: true
+  frequency: 50kHz
+
+# 本地覆寫 ld2410 元件（components/ld2410，修改自 ESPHome 2026.10.1，只加原廠校準 000B／001B 與目標狀態 4／5／6 分離；升級 ESPHome 時要重新比對，見 NOTICE.md）
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [ld2410]
+
+ld2410:
+  id: ld2410_hub
+
+output:
+  - platform: ledc
+    pin: GPIO0
+    id: buzzer
+    frequency: 1000Hz
+
+rtttl:
+  id: buzzer_rtttl
+  output: buzzer
+  gain: 80%
+
+globals:
+  # 校準用：每格的最大能量，偶數索引＝移動，奇數索引＝靜止
+  - id: cal_max
+    type: float[18]
+  - id: cal_end_ms
+    type: uint32_t
+    initial_value: '0'
+  - id: cal_samples
+    type: int
+    initial_value: '0'
+  - id: cal_running
+    type: bool
+    initial_value: 'false'
+  # 4.3.1：LED Follow Sensors 正在關閉中（template 開關的狀態要等關閉動作跑完才變，這段空檔不讓有人／PIR 把燈點亮）
+  - id: led_follow_closing
+    type: bool
+    initial_value: 'false'
+  # 校準用：每格取樣總和（算平均），索引同 cal_max
+  - id: cal_sum
+    type: float[18]
+  # 2.9 雙點校準：坐著時每格靜止能量總和與筆數；最後要寫入的 18 個門檻（索引同 cal_max）
+  - id: cal_sit_sum
+    type: float[9]
+  - id: cal_sit_ok
+    type: int
+    initial_value: '0'
+  - id: cal_skip_sit
+    type: bool
+    initial_value: 'false'
+  - id: cal_used_hist
+    type: bool
+    initial_value: 'false'
+  - id: cal_sit_n
+    type: int
+    initial_value: '0'
+  - id: cal_thr
+    type: float[18]
+  # 最近 20 次有人／無人轉換，一行一筆，最新在最前：「月-日 時:分:秒,1或0,距離cm,運動能量,靜止能量」
+  - id: trigger_log_buf
+    type: std::string
+
+  # N9/N11: PIR vs radar mismatch count, energy spike count, smart delay state
+  - id: pir_mismatch
+    type: int
+    initial_value: '0'
+  - id: spike_count
+    type: int
+    initial_value: '0'
+  - id: spike_active
+    type: bool
+    initial_value: 'false'
+  # 3.3：工程模式下一次是誰開的（0 手動、1 校準、2 智慧延時重開、3 底噪漂移、4 歷史學習）
+  - id: eng_owner_next
+    type: int
+    initial_value: '0'
+  # 3.3：雷達重開後的穩定期（期間新出現的有人不算，PIR 例外）
+  - id: settle_on
+    type: bool
+    initial_value: 'false'
+  - id: smart_base
+    type: float
+    restore_value: yes
+    initial_value: '0'
+  - id: smart_mode
+    type: int
+    restore_value: yes
+    initial_value: '0'
+  - id: smart_last_ms
+    type: uint32_t
+    initial_value: '0'
+  - id: smart_wrote
+    type: bool
+    initial_value: 'false'
+  # 3.1 智慧延時由 ESP32 計時：smart_active＝雷達底層逾時已設成 1 秒；hold_ms＝雷達放開之後再保持多久；raw_last_ms＝雷達最後一次有人
+  - id: smart_active
+    type: bool
+    restore_value: yes
+    initial_value: 'false'
+  - id: hold_ms
+    type: uint32_t
+    initial_value: '4000'
+  - id: raw_last_ms
+    type: uint32_t
+    initial_value: '0'
+  - id: tmo_synced
+    type: bool
+    restore_value: yes
+    initial_value: 'false'
+  - id: smart_eng
+    type: bool
+    initial_value: 'false'
+  # 3.2 狀態機與殘留過濾：se_hist＝最近 10 秒的靜止能量（每秒一筆）；residue＝判定是離開後的殘留回波；
+  # entry_ok＝這一刻的能量足以「從無人轉有人」（遲滯）；pres_on_ms＝最近一次轉有人的時間
+  - id: se_hist
+    type: float[60]
+  - id: se_idx
+    type: int
+    initial_value: '0'
+  - id: residue
+    type: bool
+    initial_value: 'false'
+  - id: residue_s
+    type: int
+    initial_value: '0'
+  - id: residue_min
+    type: float
+    initial_value: '0'
+  - id: residue_since
+    type: uint32_t
+    initial_value: '0'
+  - id: pres_on_ms
+    type: uint32_t
+    initial_value: '0'
+  - id: pres_state
+    type: int
+    initial_value: '-1'
+  # 3.9 進入確認：Radar Presence Raw 這一段連續有目標是從什麼時候開始（millis，沒目標時 0）
+  - id: raw_rise_ms
+    type: uint32_t
+    initial_value: '0'
+  # 4.0 遠處突跳封鎖：smart_prev_d＝上一秒最近目標距離（cm，沒目標 0）、far_block＝這段遠處目標是突跳來的、far_block_s＝已封鎖幾秒
+  # 4.0 旗標掉線橋接中（Presence Reason 的 b 旗標；網頁據此不要說「人好像離開了」）
+  # 4.1 雷達丟失保持：seat_cm＝座位距離（cm）、exit_ms＝最近一次「移動目標離座位 >= 150 cm」的時間（離開軌跡）
+  # 4.1.1：seat_cm 改成最近 60 秒靜止距離的中位數（seat_hist 每秒一筆，0＝那一秒沒有人或沒有靜止目標）。
+  #        原本用最新一筆，靜止距離一跳到 3.3–4.0 m 的鬼影，1.4 m 的動作就被當成離座
+  - id: seat_cm
+    type: float
+    initial_value: '0'
+  - id: seat_hist
+    type: float[60]
+  - id: seat_idx
+    type: int
+    initial_value: '0'
+  # 4.1.1：pres_off_ms＝最近一次轉無人的時間（0＝還沒發生過）；e_run＝雷達旗標關著但靜止能量 >= Still Energy Presence 的連續秒數
+  - id: pres_off_ms
+    type: uint32_t
+    initial_value: '0'
+  - id: e_run
+    type: int
+    initial_value: '0'
+  - id: exit_ms
+    type: uint32_t
+    initial_value: '0'
+  # 4.3：seat_n＝最近 60 秒有幾秒「有人而且有靜止目標」（每秒算）；seat_n_l＝最後一次旗標驅動有人時的 seat_n。
+  # Seated Lost Hold 要 seat_n_l >= 10 才撐：一直在動、從沒靜止過的人（走進來走出去）不算「坐著」
+  # 4.3：off_res＝最近一次轉無人時殘留回波旗標是不是成立（殘留造成的無人，結束後人還在，不再被進入遲滯擋）
+  - id: seat_n
+    type: int
+    initial_value: '0'
+  - id: seat_n_l
+    type: int
+    initial_value: '0'
+  - id: off_res
+    type: bool
+    initial_value: 'false'
+  # 4.2 離開區：zone_ms＝最近一次（旗標驅動的）雷達目標出現在 Exit Zone Near～Far 公分內的時間（0＝還沒有）
+  - id: zone_ms
+    type: uint32_t
+    initial_value: '0'
+  - id: bridging
+    type: bool
+    initial_value: 'false'
+  - id: smart_prev_d
+    type: int
+    initial_value: '0'
+  - id: far_block
+    type: bool
+    initial_value: 'false'
+  - id: far_block_s
+    type: int
+    initial_value: '0'
+  # 3.8 狀態字平滑：pres_shown＝目前對外顯示的狀態、pres_cand＝候選狀態、pres_cand_s＝候選已連續幾秒
+  - id: pres_shown
+    type: int
+    initial_value: '-1'
+  - id: pres_cand
+    type: int
+    initial_value: '-1'
+  - id: pres_cand_s
+    type: int
+    initial_value: '0'
+  # 3.8 區輸出最短保持：zone_raw＝這一刻的原始判定、zone_last＝最近一次原始判定為有人的時間
+  - id: zone_raw
+    type: uint8_t[2]
+    initial_value: '{0, 0}'
+  - id: zone_last
+    type: uint32_t[2]
+    initial_value: '{0, 0}'
+  # 3.8 校準品質不穩（供狀態字「完成（有警告）」與中止判斷）
+  - id: cal_unstable
+    type: bool
+    initial_value: 'false'
+  - id: cal_hard_unstable
+    type: bool
+    initial_value: 'false'
+  # 3.8 校準前備份（Calibration Backup；寫入前自動存，Restore Calibration 可重複還原）與備份時間（epoch）
+  - id: cal_bak
+    type: float[18]
+    restore_value: yes
+  - id: cal_bak_ok
+    type: bool
+    restore_value: yes
+    initial_value: 'false'
+  - id: cal_bak_at
+    type: uint32_t
+    restore_value: yes
+    initial_value: '0'
+  # 3.2 校準：空房取樣中止與第二點驗證
+  - id: cal_sample_ms
+    type: uint32_t
+    initial_value: '0'
+  - id: cal_abort_n
+    type: int
+    initial_value: '0'
+  - id: cal_aborted
+    type: bool
+    initial_value: 'false'
+  - id: cal_seat_sig
+    type: int
+    initial_value: '0'
+  - id: cal_lowered
+    type: int
+    initial_value: '0'
+  - id: cal_verify
+    type: int
+    initial_value: '-1'
+  # 2.9: consecutive 1 s ticks of near-still / far-only evidence
+  - id: smart_near_s
+    type: int
+    initial_value: '0'
+  - id: smart_far_s
+    type: int
+    initial_value: '0'
+  # 2.9: set while smart delay re-opens engineering mode, so the auto-off timer is not restarted
+  - id: eng_reopen
+    type: bool
+    initial_value: 'false'
+  # 2.9 spike: last time presence or PIR was on (room counts as surely empty 30 s after)
+  - id: busy_ms
+    type: uint32_t
+    initial_value: '0'
+  # 2.5 floor drift: EMA of mean still energy while the room is empty (engineering mode on)
+  - id: floor_n
+    type: int
+    initial_value: '0'
+  - id: floor_level
+    type: float
+    initial_value: '0'
+  - id: floor_ref
+    type: float
+    restore_value: yes
+    initial_value: '-1'
+  - id: empty_since
+    type: uint32_t
+    initial_value: '0'
+  - id: link_drops
+    type: int
+    initial_value: '0'
+  - id: link_attempts
+    type: int
+    initial_value: '0'
+  - id: link_was_ok
+    type: bool
+    initial_value: 'true'
+  # 3.0 history learning. Histograms: 18 rows (even = moving, odd = still, gate = row / 2) x 101 bins (energy 0..100).
+  # hq = surely empty room, ho = person confirmed (only the target's gate). Live copies in RAM, *_save are the
+  # flash copies written once an hour (writing the live ones would hit flash every 30 s).
+  - id: hq
+    type: uint16_t[1818]
+  - id: ho
+    type: uint16_t[1818]
+  - id: hq_save
+    type: uint16_t[1818]
+    restore_value: yes
+  - id: ho_save
+    type: uint16_t[1818]
+    restore_value: yes
+  - id: hist_thr
+    type: float[18]
+  - id: hist_ready
+    type: bool
+    initial_value: 'false'
+  - id: hist_changes
+    type: int
+    initial_value: '0'
+  - id: hist_clamp
+    type: bool
+    initial_value: 'false'
+  - id: hist_busy_ms
+    type: uint32_t
+    initial_value: '0'
+  - id: hist_pir_ms
+    type: uint32_t
+    initial_value: '0'
+  - id: hist_occ_eng_ms
+    type: uint32_t
+    initial_value: '0'
+  # thresholds before the last History Apply (for History Undo) and when it happened (epoch, for the 7-day rule)
+  - id: thr_bak
+    type: float[18]
+    restore_value: yes
+  - id: thr_bak_ok
+    type: bool
+    restore_value: yes
+    initial_value: 'false'
+  - id: hist_last_apply
+    type: uint32_t
+    restore_value: yes
+    initial_value: '0'
+
+binary_sensor:
+  - platform: status
+    name: "API Connection"
+    entity_category: diagnostic
+  # 3.1：雷達原始有人（internal），對外的 Radar Presence 是下面的範本實體（智慧延時開著時由 ESP32 計時）
+  - platform: ld2410
+    has_target:
+      name: "Radar Presence Raw"
+      id: presence_raw
+      internal: true
+      on_state:
+        then:
+          - lambda: 'id(raw_rise_ms) = x ? millis() : 0;'
+    has_moving_target:
+      name: "Radar Moving Target"
+      id: radar_moving
+      on_state:
+        then:
+          - script.execute: zone_eval
+    has_still_target:
+      name: "Radar Still Target"
+      id: radar_still
+      on_state:
+        then:
+          - script.execute: zone_eval
+  # 3.3 機器讀的布林
+  - platform: template
+    name: "Low Memory"
+    id: low_mem_bs
+    device_class: problem
+    entity_category: diagnostic
+    # 3.7：有 lambda 的範本 binary sensor 每圈主迴圈都會執行一次；記憶體不需要這麼勤，改成在每 10 秒的 interval 裡發布
+  - platform: template
+    name: "Calibration Active"
+    id: cal_active_bs
+    entity_category: diagnostic
+  - platform: template
+    name: "Calibration Used History"
+    id: cr_used_hist
+    entity_category: diagnostic
+  - platform: template
+    name: "Calibration Seated Skipped"
+    id: cr_seat_skipped
+    entity_category: diagnostic
+  - platform: template
+    name: "Calibration Seat Seen"
+    id: cr_seat_seen
+    entity_category: diagnostic
+  - platform: template
+    name: "Radar Settling"
+    id: radar_settling
+    entity_category: diagnostic
+  - platform: template
+    name: "PIR Mismatch Now"
+    id: pir_mm_now
+    entity_category: diagnostic
+  - platform: template
+    name: "Radar Presence"
+    id: presence
+    lambda: |-
+      bool raw = id(presence_raw).state;
+      bool by_energy = false;
+      id(bridging) = false;
+      // 4.1.1：雷達旗標關著，但靜止能量 >= Still Energy Presence 已連續 2 秒，也算雷達有目標（限最近有人過；0＝關）。
+      // 旗標掉線後多半要等移動目標出現才會回來，坐著不動時即使靜止能量高也可能等不到旗標。只在智慧延時開著時作用
+      if (!raw && id(smart_active) && id(e_run) >= 2 && id(raw_last_ms) != 0) {
+        float ls0 = id(lost_hold_s).state;
+        uint32_t win = (uint32_t) (std::max(60.0f, std::isnan(ls0) ? 0.0f : ls0) * 1000.0f);
+        if (id(presence).state || millis() - id(raw_last_ms) < win) { raw = true; by_energy = true; }
+      }
+      // 3.3：雷達設定寫入、重開後約 12 秒的穩定期，新出現的有人不算（PIR 有動作除外）
+      if (raw && id(settle_on) && !id(presence).state && !id(motion).state) raw = false;
+      // 3.2：智慧延時開著時，殘留回波不算有人；無人→有人要過遲滯（能量高於該格門檻＋餘裕，或 PIR）
+      if (raw && id(smart_active)) {
+        if (id(residue)) raw = false;
+        else if (!by_energy && !id(presence).state && !id(motion).state) {
+          float res = ${radar_res_m};
+          float h = id(hyst_margin).state; if (std::isnan(h)) h = 0;
+          number::Number *mt[9] = {${gates_thr_move_9}};
+          number::Number *st[9] = {${gates_thr_still_9}};
+          // 4.3：剛因殘留回波轉無人（60 秒內），殘留結束後人還在，不再要求「門檻＋遲滯」
+          bool ok = h <= 0 || (id(off_res) && id(pres_off_ms) != 0 && millis() - id(pres_off_ms) <= 60000);
+          float md = id(radar_move_dist).state, me = id(radar_move_energy).state;
+          float sd = id(radar_still_dist).state, se = id(radar_still_energy).state;
+          if (!ok && id(radar_moving).state && !std::isnan(md) && !std::isnan(me)) {
+            int g = std::min(8, std::max(0, (int) (md / res))); float t = mt[g]->state;
+            ok = std::isnan(t) || me >= t + h;
+          }
+          if (!ok && id(radar_still).state && !std::isnan(sd) && !std::isnan(se)) {
+            int g = std::min(8, std::max(0, (int) (sd / res))); float t = st[g]->state;
+            ok = std::isnan(t) || se >= t + h;
+          }
+          if (!ok) raw = false;
+        }
+      }
+      // 3.9：無人→有人要雷達連續有目標 Entry Confirm Seconds 秒才算（PIR 有動作立刻算；0＝關）。
+      // 擋空房每約 30 分鐘一次、只亮 1 秒的單幀突波
+      if (raw && !by_energy && !id(presence).state && !id(motion).state) {
+        float ec = id(entry_confirm_s).state;
+        // 4.0.1：開機時雷達旗標已經是 ON 沒有上升緣，raw_rise_ms 會一直是 0 而永遠擋住；0 視為「現在才開始算」
+        if (id(raw_rise_ms) == 0) id(raw_rise_ms) = millis();
+        if (!std::isnan(ec) && ec > 0 && millis() - id(raw_rise_ms) < (uint32_t) (ec * 1000.0f)) raw = false;
+      }
+      if (raw) {
+        // 4.1.1：seat_cm 由 smart_delay_tick 每秒算（60 秒中位數），這裡只判斷離座軌跡
+        float md0 = id(radar_move_dist).state;
+        if (id(radar_moving).state && !std::isnan(md0) && id(seat_cm) > 0 && fabsf(md0 - id(seat_cm)) >= 150.0f) id(exit_ms) = millis();
+        // 靠能量算有人時雷達沒有目標位置，區輸出與橋接一樣維持原值
+        if (by_energy) id(bridging) = true;
+        // 4.2 離開區：旗標驅動的目標（不含靠能量算有人）出現在 Exit Zone Near～Far 公分內，就記下時間
+        if (!by_energy) id(seat_n_l) = id(seat_n);
+        if (!by_energy) {
+          float zn = id(exit_near).state, zf = id(exit_far).state, md1 = id(radar_move_dist).state, sd1 = id(radar_still_dist).state;
+          if (!std::isnan(zn) && !std::isnan(zf) && zf > zn &&
+              ((id(radar_moving).state && !std::isnan(md1) && md1 >= zn && md1 <= zf) ||
+               (id(radar_still).state && !std::isnan(sd1) && sd1 >= zn && sd1 <= zf)))
+            id(zone_ms) = millis();
+        }
+        id(raw_last_ms) = millis(); return true;
+      }
+      if (!id(smart_active) || id(raw_last_ms) == 0) return false;
+      // 4.0：保持時間只能延續「已經是有人」的狀態。否則縮短保持到期轉無人後，狀態變 Empty、hold_ms 回到基本值，
+      // 剛過的 2–3 秒又小於它，會多亮 1–2 秒
+      if (!id(presence).state) return false;
+      // 4.2 離開區：旗標剛消失，消失前 Exit Zone Seconds 秒內目標還在門口那段距離，靜止能量已低於 Exit Zone Max Energy，
+      // 而且 PIR 也沒亮，就直接轉無人（不給橋接、Lost Hold、保持）。PIR 還亮著不轉：站在門口時雷達旗標會斷續掉線，PIR 卻是亮的
+      // Exit Zone Seconds 0＝關
+      {
+        float zw = id(exit_win_s).state, ze = id(exit_e).state, se2 = id(radar_still_energy).state;
+        if (!std::isnan(zw) && zw > 0 && !std::isnan(ze) && !std::isnan(se2) && se2 < ze && id(zone_ms) != 0 && !id(motion).state &&
+            id(raw_last_ms) - id(zone_ms) <= (uint32_t) (zw * 1000.0f)) { id(bridging) = false; return false; }
+      }
+      // 4.0：雷達旗標掉線但靜止能量仍高（>= Dropout Bridge Energy）時，視為仍有人，從最後一次真有目標起最多撐 Dropout Bridge Seconds 秒
+      // 靜止坐著的人旗標掉線時能量仍接近滿格；真正的空房掉線時能量不會長時間偏高。
+      {
+        float be = id(bridge_e).state, bs = id(bridge_s).state, se = id(radar_still_energy).state;
+        if (!std::isnan(be) && !std::isnan(bs) && !std::isnan(se) && be > 0 && bs > 0 && se >= be && !id(residue) &&
+            millis() - id(raw_last_ms) < (uint32_t) (bs * 1000.0f)) { id(bridging) = true; return true; }
+      }
+      // 4.1：雷達丟失保持。人已在場 >= 60 秒、掉線前 15 秒沒有「離開座位的移動軌跡」時，
+      // 視為雷達暫時丟了靜止人體。
+      // 最多撐 Seated Lost Hold Seconds 秒；雷達旗標回來或出現離座的移動軌跡就回到正常判斷（0＝關）
+      {
+        float ls = id(lost_hold_s).state;
+        uint32_t now = millis();
+        // 4.3：60 秒資格在「掉線當下」（raw_last_ms）比，不是在判定當下比（原本在判定當下比，掉線後靠保持時間就能取得資格）
+        // 4.3：還要掉線前 60 秒內至少 10 秒有靜止目標（真的「坐著」過）；seat_n_l 見上方全域說明
+        if (!std::isnan(ls) && ls > 0 && (int32_t) (id(raw_last_ms) - id(pres_on_ms)) >= 60000 && id(seat_n_l) >= 10 && !id(residue) &&
+            (id(exit_ms) == 0 || id(exit_ms) + 15000 < id(raw_last_ms)) &&
+            now - id(raw_last_ms) < (uint32_t) (ls * 1000.0f)) { id(bridging) = true; return true; }
+      }
+      id(bridging) = false;
+      return millis() - id(raw_last_ms) < id(hold_ms);
+    on_press:
+      then:
+        # 4.1.1：無人的間隔 <= 60 秒就沿用原本的轉有人時間。原本每次都重設，一次短暫誤判無人之後的 60 秒內
+        # Seated Lost Hold 沒有資格、保持也回到基本值，誤判會連鎖
+        - lambda: |-
+            uint32_t now = millis();
+            if (id(pres_off_ms) == 0 || now - id(pres_off_ms) > 60000) id(pres_on_ms) = now;
+        - lambda: |-
+            auto tm = id(sntp_time).now();
+            if (tm.is_valid()) id(presence_changed_at).publish_state(ESPTime::from_epoch_utc(tm.timestamp).strftime("%Y-%m-%dT%H:%M:%SZ"));
+        - script.execute: zone_eval
+        - script.execute:
+            id: log_trigger
+            present: true
+        - if:
+            condition:
+              lambda: 'return id(led_follow).state && !id(led_follow_closing);'
+            then:
+              - light.turn_on:
+                  id: ws2812_left
+                  brightness: !lambda 'return id(led_brightness).state / 100.0f;'
+                  effect: "Left Flow"
+    on_release:
+      then:
+        - lambda: |-
+            id(pres_off_ms) = millis();
+            if (id(pres_off_ms) == 0) id(pres_off_ms) = 1;
+            id(off_res) = id(residue);
+            auto tm = id(sntp_time).now();
+            if (tm.is_valid()) id(presence_changed_at).publish_state(ESPTime::from_epoch_utc(tm.timestamp).strftime("%Y-%m-%dT%H:%M:%SZ"));
+        - script.execute: zone_eval
+        - script.execute:
+            id: log_trigger
+            present: false
+        - if:
+            condition:
+              switch.is_on: led_follow
+            then:
+              - light.turn_off: ws2812_left
+  - platform: gpio
+    pin:
+      number: GPIO10
+      mode:
+        input: true
+    name: "PIR Motion"
+    id: motion
+    filters:
+      - delayed_off: !lambda |-
+          float h = id(pir_hold_s).state; if (std::isnan(h)) h = 5;
+          return (uint32_t) (h * 1000.0f);
+    on_press:
+      then:
+        - script.execute: pir_check
+        - if:
+            condition:
+              lambda: 'return id(led_follow).state && !id(led_follow_closing);'
+            then:
+              - light.turn_on:
+                  id: ws2812_right
+                  brightness: !lambda 'return id(led_brightness).state / 100.0f;'
+                  effect: "Right Flow"
+    on_release:
+      then:
+        - if:
+            condition:
+              switch.is_on: led_follow
+            then:
+              - light.turn_off: ws2812_right
+  # 4.2：拿掉 GPIO7「Radar OUT Pin」與 UART「Radar OUT Status」：原廠韌體沒有用 OUT 腳，加的實體實測從未變 ON，
+  # UART 狀態又只有工程模式才有值、等於「雷達有人」的重複資訊。「Radar OUT Pin Level」「Radar Light Function」是雷達內部設定，保留
+
+  - platform: template
+    name: "Radar Link"
+    id: radar_link
+    device_class: connectivity
+    entity_category: diagnostic
+  - platform: template
+    name: "Zone 1 Occupied"
+    id: zone1_occupied
+  - platform: template
+    name: "Zone 2 Occupied"
+    id: zone2_occupied
+
+sensor:
+  # 3.1 目前實際的無人逾時（智慧延時延長／縮短後的值；關著時＝Radar Presence Timeout）
+  - platform: template
+    name: "Presence Hold"
+    id: presence_hold
+    unit_of_measurement: "s"
+    accuracy_decimals: 0
+    update_interval: never
+    entity_category: diagnostic
+  # 3.0 history learning progress (hours of empty-room samples on the least-sampled gate; 20000 samples = 5.6 h = ready)
+  - platform: template
+    name: "History Empty Hours"
+    id: hist_q_hours
+    unit_of_measurement: "h"
+    accuracy_decimals: 1
+    state_class: measurement
+    entity_category: diagnostic
+  - platform: template
+    name: "History Occupied Samples"
+    id: hist_o_n
+    state_class: measurement
+    entity_category: diagnostic
+  - platform: template
+    name: "History Changes"
+    id: hist_changes_s
+    entity_category: diagnostic
+  - platform: template
+    name: "Radar Link Drops"
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    state_class: total_increasing
+    update_interval: 10s
+    lambda: 'return id(link_drops);'
+    filters:
+      - delta: 0.5
+  - platform: template
+    name: "Radar Floor Level"
+    state_class: measurement
+    entity_category: diagnostic
+    accuracy_decimals: 1
+    update_interval: 30s
+    lambda: 'if (id(floor_n) < 6) return NAN; return id(floor_level);'
+    filters:
+      - delta: 0.2
+  - platform: template
+    name: "Radar Floor Drift"
+    state_class: measurement
+    entity_category: diagnostic
+    accuracy_decimals: 1
+    update_interval: 30s
+    lambda: 'if (id(floor_n) < 6 || id(floor_ref) < 0) return NAN; return id(floor_level) - id(floor_ref);'
+    filters:
+      - delta: 0.2
+  - platform: template
+    name: "Radar Target State"
+    icon: "mdi:radar"
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 1s
+    lambda: 'return id(ld2410_hub)->get_target_state_raw();'
+    filters:
+      - delta: 0.5
+  - platform: template
+    name: "Radar PIR Mismatch Count"
+    state_class: total_increasing
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 10s
+    lambda: 'return id(pir_mismatch);'
+    filters:
+      - delta: 0.5
+  # 3.3 機器讀的數值（時間類改用文字感測器、UTC ISO 字串：float 存 epoch 只準到約 2 分鐘）
+  - platform: template
+    name: "Calibration Total Seconds"
+    id: cal_total_s
+    unit_of_measurement: s
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: never
+  - platform: template
+    name: "Calibration Samples"
+    id: cr_samples
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: never
+  - platform: template
+    name: "Calibration Seat Gates"
+    id: cr_seat_gates
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: never
+  - platform: template
+    name: "Last Spike Gate"
+    id: last_spike_gate
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: never
+  - platform: template
+    name: "Radar Energy Spike Count"
+    state_class: total_increasing
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 1s
+    # 2.9: count only when the room is surely empty (radar and PIR off for 30 s). With a person in the room a gate
+    # at 100 is normal saturation, so it is not counted.
+    lambda: |-
+      uint32_t now = millis();
+      if (id(presence).state || id(motion).state) id(busy_ms) = now;
+      float win = id(spike_window).state; if (std::isnan(win)) win = 30;
+      bool quiet = !id(presence).state && !id(motion).state && now - id(busy_ms) >= (uint32_t) (win * 1000);
+      sensor::Sensor *ge[18] = {${gates_energy_all_18}};
+      int sg = -1;
+      if (quiet && id(ld2410_engineering).state)
+        for (int i = 0; i < 18 && sg < 0; i++) if (ge[i]->state >= 100) sg = i / 2;
+      bool spike = sg >= 0;
+      if (spike && !id(spike_active)) {
+        id(spike_count)++;
+        id(last_spike_gate).publish_state(sg);
+        auto tm = id(sntp_time).now();
+        if (tm.is_valid()) id(last_spike_time).publish_state(ESPTime::from_epoch_utc(tm.timestamp).strftime("%Y-%m-%dT%H:%M:%SZ"));
+      }
+      id(spike_active) = spike;
+      return id(spike_count);
+    filters:
+      - delta: 0.5
+  - platform: aht10
+    variant: AHT20
+    address: 0x38
+    update_interval: 10s
+    temperature:
+      name: "Temperature"
+      id: temperature
+      filters:
+        - lambda: |-
+            float o = id(temp_offset).state;
+            return x + (std::isnan(o) ? 0.0f : o);
+    humidity:
+      name: "Humidity"
+      id: humidity
+      filters:
+        - lambda: |-
+            float o = id(humi_offset).state;
+            return x + (std::isnan(o) ? 0.0f : o);
+        - clamp:
+            min_value: 0
+            max_value: 100
+  - platform: bh1750
+    name: "Illuminance"
+    address: 0x23
+    update_interval: 5s
+    # 3.7：數值常與上一筆相同。變化超過 2 lx 就送，沒變化最多每 60 秒送一次（網頁仍看得到更新）
+    filters:
+      - or:
+          - delta: 2
+          - throttle: 60s
+  - platform: ld2410
+    moving_distance:
+      name: "Radar Moving Distance"
+      id: radar_move_dist
+      # 3.2：中位數平滑（距離讀值常會跳動）
+      filters:
+        - median:
+            window_size: 5
+            send_every: 1
+            send_first_at: 1
+      on_value:
+        then:
+          - script.execute: zone_eval
+    still_distance:
+      name: "Radar Still Distance"
+      id: radar_still_dist
+      # 3.2：中位數平滑（距離讀值常會跳動）
+      filters:
+        - median:
+            window_size: 5
+            send_every: 1
+            send_first_at: 1
+      on_value:
+        then:
+          - script.execute: zone_eval
+    detection_distance:
+      name: "Radar Detection Distance"
+      id: radar_detect_dist
+      filters:
+        - median:
+            window_size: 5
+            send_every: 1
+            send_first_at: 1
+    moving_energy:
+      name: "Radar Moving Energy"
+      id: radar_move_energy
+    still_energy:
+      name: "Radar Still Energy"
+      id: radar_still_energy
+    light:
+      name: "Radar Light"
+    g0:
+      move_energy:
+        name: "Gate 0 Move Energy"
+        id: g0_move_energy
+        filters: &gate_energy_filters
+          - timeout:
+              timeout: 1s
+              value: last
+          - throttle_with_priority: 500ms
+        entity_category: diagnostic
+      still_energy:
+        name: "Gate 0 Still Energy"
+        id: g0_still_energy
+        filters: *gate_energy_filters
+        entity_category: diagnostic
+    g1:
+      move_energy:
+        name: "Gate 1 Move Energy"
+        id: g1_move_energy
+        filters: *gate_energy_filters
+        entity_category: diagnostic
+      still_energy:
+        name: "Gate 1 Still Energy"
+        id: g1_still_energy
+        filters: *gate_energy_filters
+        entity_category: diagnostic
+    g2:
+      move_energy:
+        name: "Gate 2 Move Energy"
+        id: g2_move_energy
+        filters: *gate_energy_filters
+        entity_category: diagnostic
+      still_energy:
+        name: "Gate 2 Still Energy"
+        id: g2_still_energy
+        filters: *gate_energy_filters
+        entity_category: diagnostic
+    g3:
+      move_energy:
+        name: "Gate 3 Move Energy"
+        id: g3_move_energy
+        filters: *gate_energy_filters
+        entity_category: diagnostic
+      still_energy:
+        name: "Gate 3 Still Energy"
+        id: g3_still_energy
+        filters: *gate_energy_filters
+        entity_category: diagnostic
+    g4:
+      move_energy:
+        name: "Gate 4 Move Energy"
+        id: g4_move_energy
+        filters: *gate_energy_filters
+        entity_category: diagnostic
+      still_energy:
+        name: "Gate 4 Still Energy"
+        id: g4_still_energy
+        filters: *gate_energy_filters
+        entity_category: diagnostic
+    g5:
+      move_energy:
+        name: "Gate 5 Move Energy"
+        id: g5_move_energy
+        filters: *gate_energy_filters
+        entity_category: diagnostic
+      still_energy:
+        name: "Gate 5 Still Energy"
+        id: g5_still_energy
+        filters: *gate_energy_filters
+        entity_category: diagnostic
+    g6:
+      move_energy:
+        name: "Gate 6 Move Energy"
+        id: g6_move_energy
+        filters: *gate_energy_filters
+        entity_category: diagnostic
+      still_energy:
+        name: "Gate 6 Still Energy"
+        id: g6_still_energy
+        filters: *gate_energy_filters
+        entity_category: diagnostic
+    g7:
+      move_energy:
+        name: "Gate 7 Move Energy"
+        id: g7_move_energy
+        filters: *gate_energy_filters
+        entity_category: diagnostic
+      still_energy:
+        name: "Gate 7 Still Energy"
+        id: g7_still_energy
+        filters: *gate_energy_filters
+        entity_category: diagnostic
+    g8:
+      move_energy:
+        name: "Gate 8 Move Energy"
+        id: g8_move_energy
+        filters: *gate_energy_filters
+        entity_category: diagnostic
+      still_energy:
+        name: "Gate 8 Still Energy"
+        id: g8_still_energy
+        filters: *gate_energy_filters
+        entity_category: diagnostic
+  - platform: internal_temperature
+    name: "Chip Temperature"
+    entity_category: diagnostic
+  - platform: debug
+    free:
+      name: "Heap Free"
+    block:
+      name: "Heap Largest Block"
+    loop_time:
+      name: "Loop Time"
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 60s
+    entity_category: diagnostic
+  - platform: uptime
+    name: "Uptime"
+    update_interval: 60s
+    entity_category: diagnostic
+
+# 雷達可調項。門檻、逾時、最遠距離格都存在雷達裡，不必重刷
+number:
+  - platform: template
+    name: "Radar Link Timeout"
+    id: radar_link_timeout
+    optimistic: true
+    min_value: 2
+    max_value: 60
+    step: 1
+    initial_value: 5
+    restore_value: true
+    unit_of_measurement: "s"
+    mode: box
+    entity_category: config
+  - platform: template
+    name: "Zone 1 Start Gate"
+    id: zone1_start
+    on_value:
+      then:
+        - script.execute: zone_eval
+    optimistic: true
+    min_value: 0
+    max_value: 8
+    step: 1
+    initial_value: 0
+    restore_value: true
+    mode: box
+    entity_category: config
+  - platform: template
+    name: "Zone 1 End Gate"
+    id: zone1_end
+    on_value:
+      then:
+        - script.execute: zone_eval
+    optimistic: true
+    min_value: 0
+    max_value: 8
+    step: 1
+    initial_value: 3
+    restore_value: true
+    mode: box
+    entity_category: config
+  - platform: template
+    name: "Zone 2 Start Gate"
+    id: zone2_start
+    on_value:
+      then:
+        - script.execute: zone_eval
+    optimistic: true
+    min_value: 0
+    max_value: 8
+    step: 1
+    initial_value: 4
+    restore_value: true
+    mode: box
+    entity_category: config
+  - platform: template
+    name: "Zone 2 End Gate"
+    id: zone2_end
+    on_value:
+      then:
+        - script.execute: zone_eval
+    optimistic: true
+    min_value: 0
+    max_value: 8
+    step: 1
+    initial_value: 8
+    restore_value: true
+    mode: box
+    entity_category: config
+  - platform: template
+    name: "Delay Extend Still Near"
+    id: delay_extend
+    optimistic: true
+    min_value: 0
+    max_value: 120
+    step: 1
+    initial_value: 10
+    restore_value: true
+    unit_of_measurement: "s"
+    mode: box
+    entity_category: config
+  - platform: template
+    name: "Delay Near Range"
+    id: delay_near
+    optimistic: true
+    min_value: 0
+    max_value: 8
+    step: 1
+    initial_value: 3
+    restore_value: true
+    unit_of_measurement: "gate"
+    mode: box
+    entity_category: config
+  - platform: template
+    name: "Delay Shorten Move Away"
+    id: delay_shorten
+    optimistic: true
+    min_value: 0
+    max_value: 60
+    step: 1
+    initial_value: 2
+    restore_value: true
+    unit_of_measurement: "s"
+    mode: box
+    entity_category: config
+  # 3.3：智慧延時的兩個判斷秒數、突波的空房時間（原本寫死 10、2、30）
+  - platform: template
+    name: "Delay Still Near Seconds"
+    id: delay_still_s
+    optimistic: true
+    min_value: 1
+    max_value: 60
+    step: 1
+    initial_value: 10
+    restore_value: true
+    unit_of_measurement: s
+    entity_category: config
+  - platform: template
+    name: "Delay Move Away Seconds"
+    id: delay_away_s
+    optimistic: true
+    min_value: 1
+    max_value: 30
+    step: 1
+    initial_value: 2
+    restore_value: true
+    unit_of_measurement: s
+    entity_category: config
+  - platform: template
+    name: "Spike Window Seconds"
+    id: spike_window
+    optimistic: true
+    min_value: 5
+    max_value: 300
+    step: 5
+    initial_value: 30
+    restore_value: true
+    unit_of_measurement: s
+    entity_category: config
+  # 3.4：殘留回波與進入期的常數改為可調（原本寫死 8、60、3、5、60、10）。預設值＝3.3 的行為，燒錄後行為不變；
+  # 其中「降幅」「能量上限」「回升」與位置、能量尺度有關，預設只是暫定值，
+  # 不一定適合每個場地，換地點要自己調。時間類（確認秒數、最長維持、進入期）與環境無關。
+  # 4.1.1：Residue Drop 可設 0＝關閉殘留規則，預設為 0。這條規則只作用在「門檻」與「能量上限」之間的能量帶，
+  # 那正好是坐定後的能量，容易把坐著的人誤判成殘留，所以預設關閉
+  - platform: template
+    name: "Residue Drop"
+    id: residue_drop
+    optimistic: true
+    min_value: 0
+    max_value: 50
+    step: 1
+    initial_value: 0
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: "Residue Max Energy"
+    id: residue_max_e
+    optimistic: true
+    min_value: 5
+    max_value: 100
+    step: 1
+    initial_value: 35
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: "Residue Rebound"
+    id: residue_rebound
+    optimistic: true
+    min_value: 1
+    max_value: 30
+    step: 1
+    initial_value: 5
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: "Residue Confirm Seconds"
+    id: residue_confirm_s
+    optimistic: true
+    min_value: 1
+    max_value: 30
+    step: 1
+    initial_value: 4
+    restore_value: true
+    unit_of_measurement: s
+    entity_category: config
+  - platform: template
+    name: "Residue Max Seconds"
+    id: residue_max_s
+    optimistic: true
+    min_value: 10
+    max_value: 300
+    step: 5
+    initial_value: 60
+    restore_value: true
+    unit_of_measurement: s
+    entity_category: config
+  # 3.8：區 1／區 2 有人輸出最短保持秒數（0＝關）；狀態字（Presence State）換狀態前要連續幾秒（0＝關）
+  # 3.8 校準取樣最大波動達到這個值就中止（不寫門檻）；介於 Calibration Spread Limit 與這個值之間只警告
+  - platform: template
+    name: "Calibration Abort Spread"
+    id: cal_abort_spread
+    optimistic: true
+    min_value: 10
+    max_value: 100
+    step: 1
+    initial_value: 40
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: "Zone Hold Seconds"
+    id: zone_hold_s
+    optimistic: true
+    min_value: 0
+    max_value: 30
+    step: 1
+    initial_value: 4
+    restore_value: true
+    unit_of_measurement: s
+    entity_category: config
+  - platform: template
+    name: "State Smooth Seconds"
+    id: state_smooth_s
+    optimistic: true
+    min_value: 0
+    max_value: 30
+    step: 1
+    initial_value: 3
+    restore_value: true
+    unit_of_measurement: s
+    entity_category: config
+  # 3.9：無人→有人要雷達連續有目標幾秒才算（PIR 有動作立刻算；0＝關）。預設 2：擋單幀突波，真進房多約 1 秒
+  - platform: template
+    name: "Entry Confirm Seconds"
+    id: entry_confirm_s
+    optimistic: true
+    min_value: 0
+    max_value: 10
+    step: 1
+    initial_value: 2
+    restore_value: true
+    unit_of_measurement: s
+    entity_category: config
+  # 4.0：雷達旗標掉線但靜止能量 >= 這個值時仍算有人（0＝關），最多撐 Dropout Bridge Seconds 秒（0＝關）
+  - platform: template
+    name: "Dropout Bridge Energy"
+    id: bridge_e
+    optimistic: true
+    min_value: 0
+    max_value: 100
+    step: 1
+    initial_value: 60
+    restore_value: true
+    unit_of_measurement: "%"
+    entity_category: config
+  - platform: template
+    name: "Dropout Bridge Seconds"
+    id: bridge_s
+    optimistic: true
+    min_value: 0
+    max_value: 300
+    step: 1
+    initial_value: 60
+    restore_value: true
+    unit_of_measurement: s
+    entity_category: config
+  # 4.1：雷達旗標掉線、人已在場 60 秒以上且沒有離座軌跡時，最多保持幾秒（0＝關）
+  - platform: template
+    name: "Seated Lost Hold Seconds"
+    id: lost_hold_s
+    optimistic: true
+    min_value: 0
+    max_value: 600
+    step: 1
+    initial_value: 180
+    restore_value: true
+    unit_of_measurement: s
+    entity_category: config
+  # 4.1.1：雷達旗標關著但靜止能量 >= 這個值連續 2 秒，也算雷達有目標（0＝關）。與雷達能量大小有關，換地點要先確認空房能量上限
+  - platform: template
+    name: "Still Energy Presence"
+    id: energy_pres
+    optimistic: true
+    min_value: 0
+    max_value: 100
+    step: 1
+    initial_value: 30
+    restore_value: true
+    unit_of_measurement: "%"
+    entity_category: config
+  # 4.2 離開區（預設全關＝Exit Zone Seconds 0；距離與場地有關，換地點要重新量）：人離開前雷達目標常先出現在門口附近的一段距離，
+  # 之後旗標消失且靜止能量回到空房水準（< Exit Zone Max Energy）、PIR 也沒亮，就直接轉無人，不給橋接、Lost Hold 與保持。
+  # 設定方式：在門口附近走動，記下雷達讀到的距離範圍與空房的靜止能量，再據此設定距離範圍、秒數與能量；各場地要自己量
+  - platform: template
+    name: "Exit Zone Near"
+    id: exit_near
+    optimistic: true
+    min_value: 0
+    max_value: 900
+    step: 1
+    initial_value: 0
+    restore_value: true
+    unit_of_measurement: cm
+    entity_category: config
+  - platform: template
+    name: "Exit Zone Far"
+    id: exit_far
+    optimistic: true
+    min_value: 0
+    max_value: 900
+    step: 1
+    initial_value: 0
+    restore_value: true
+    unit_of_measurement: cm
+    entity_category: config
+  - platform: template
+    name: "Exit Zone Seconds"
+    id: exit_win_s
+    optimistic: true
+    min_value: 0
+    max_value: 60
+    step: 1
+    initial_value: 0
+    restore_value: true
+    unit_of_measurement: s
+    entity_category: config
+  - platform: template
+    name: "Exit Zone Max Energy"
+    id: exit_e
+    optimistic: true
+    min_value: 0
+    max_value: 100
+    step: 1
+    initial_value: 15
+    restore_value: true
+    unit_of_measurement: "%"
+    entity_category: config
+  # 4.1：自動亮的燈（有人／PIR 跑馬、Wi-Fi 斷線閃紅、校準呼吸）共用的亮度
+  - platform: template
+    name: "LED Brightness"
+    id: led_brightness
+    optimistic: true
+    min_value: 1
+    max_value: 100
+    step: 1
+    initial_value: 30
+    restore_value: true
+    unit_of_measurement: "%"
+    entity_category: config
+  - platform: template
+    name: "Entering Seconds"
+    id: entering_s
+    optimistic: true
+    min_value: 1
+    max_value: 60
+    step: 1
+    initial_value: 10
+    restore_value: true
+    unit_of_measurement: s
+    entity_category: config
+  # 3.4：寫死的時間／統計常數全部改為可調數字（預設值＝3.3 的寫死值，燒錄後行為不變）。
+  # 與環境無關的值，預設即為目前最佳值；仍可依需要調整。
+  - platform: template
+    name: "Floor Wait Seconds"
+    id: floor_wait_s
+    optimistic: true
+    min_value: 10
+    max_value: 600
+    step: 10
+    initial_value: 60
+    restore_value: true
+    unit_of_measurement: "s"
+    entity_category: config
+  - platform: template
+    name: "Floor Window Samples"
+    id: floor_window
+    optimistic: true
+    min_value: 30
+    max_value: 1000
+    step: 10
+    initial_value: 180
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: "Floor Sample Interval Minutes"
+    id: floor_every_min
+    optimistic: true
+    min_value: 10
+    max_value: 120
+    step: 5
+    initial_value: 30
+    restore_value: true
+    unit_of_measurement: "min"
+    entity_category: config
+  - platform: template
+    name: "Occupied Sample Interval Minutes"
+    id: occ_every_min
+    optimistic: true
+    min_value: 10
+    max_value: 240
+    step: 5
+    initial_value: 60
+    restore_value: true
+    unit_of_measurement: "min"
+    entity_category: config
+  - platform: template
+    name: "PIR Recent Seconds"
+    id: pir_recent_s
+    optimistic: true
+    min_value: 30
+    max_value: 1800
+    step: 30
+    initial_value: 300
+    restore_value: true
+    unit_of_measurement: "s"
+    entity_category: config
+  - platform: template
+    name: "History Start Delay Seconds"
+    id: hist_start_s
+    optimistic: true
+    min_value: 0
+    max_value: 1800
+    step: 30
+    initial_value: 180
+    restore_value: true
+    unit_of_measurement: "s"
+    entity_category: config
+  - platform: template
+    name: "History Quiet Seconds"
+    id: hist_quiet_s
+    optimistic: true
+    min_value: 60
+    max_value: 3600
+    step: 60
+    initial_value: 600
+    restore_value: true
+    unit_of_measurement: "s"
+    entity_category: config
+  - platform: template
+    name: "History Auto Apply Days"
+    id: hist_apply_days
+    optimistic: true
+    min_value: 1
+    max_value: 30
+    step: 1
+    initial_value: 7
+    restore_value: true
+    unit_of_measurement: "d"
+    entity_category: config
+  - platform: template
+    name: "History Auto Apply Max Step"
+    id: hist_clamp_step
+    optimistic: true
+    min_value: 1
+    max_value: 50
+    step: 1
+    initial_value: 10
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: "History Min Empty Samples"
+    id: hist_min_q
+    optimistic: true
+    min_value: 1000
+    max_value: 60000
+    step: 1000
+    initial_value: 20000
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: "History Min Occupied Samples"
+    id: hist_min_occ
+    optimistic: true
+    min_value: 50
+    max_value: 10000
+    step: 50
+    initial_value: 300
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: "History Empty Percentile"
+    id: hist_pct_empty
+    optimistic: true
+    min_value: 90
+    max_value: 100
+    step: 0.1
+    initial_value: 99.9
+    restore_value: true
+    unit_of_measurement: "%"
+    entity_category: config
+  - platform: template
+    name: "History Occupied Percentile"
+    id: hist_pct_occ
+    optimistic: true
+    min_value: 1
+    max_value: 50
+    step: 1
+    initial_value: 10
+    restore_value: true
+    unit_of_measurement: "%"
+    entity_category: config
+  - platform: template
+    name: "History Seat Gap"
+    id: seat_gap
+    optimistic: true
+    min_value: 1
+    max_value: 20
+    step: 1
+    initial_value: 2
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: "Calibration Abort Wait Seconds"
+    id: cal_abort_wait_s
+    optimistic: true
+    min_value: 1
+    max_value: 30
+    step: 1
+    initial_value: 5
+    restore_value: true
+    unit_of_measurement: "s"
+    entity_category: config
+  - platform: template
+    name: "Calibration Abort Move Energy"
+    id: cal_abort_energy
+    optimistic: true
+    min_value: 30
+    max_value: 100
+    step: 1
+    initial_value: 90
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: "Calibration Abort Confirm Seconds"
+    id: cal_abort_s
+    optimistic: true
+    min_value: 1
+    max_value: 10
+    step: 1
+    initial_value: 1
+    restore_value: true
+    unit_of_measurement: "s"
+    entity_category: config
+  - platform: template
+    name: "Calibration Sit Wait Seconds"
+    id: cal_sit_wait_s
+    optimistic: true
+    min_value: 30
+    max_value: 300
+    step: 10
+    initial_value: 90
+    restore_value: true
+    unit_of_measurement: "s"
+    entity_category: config
+  - platform: template
+    name: "Calibration Sit Confirm Seconds"
+    id: cal_sit_confirm_s
+    optimistic: true
+    min_value: 1
+    max_value: 10
+    step: 1
+    initial_value: 3
+    restore_value: true
+    unit_of_measurement: "s"
+    entity_category: config
+  - platform: template
+    name: "Calibration Verify Seconds"
+    id: cal_verify_s
+    optimistic: true
+    min_value: 1
+    max_value: 10
+    step: 1
+    initial_value: 3
+    restore_value: true
+    unit_of_measurement: "s"
+    entity_category: config
+  - platform: template
+    name: "Residue Window Seconds"
+    id: residue_window
+    optimistic: true
+    min_value: 3
+    max_value: 60
+    step: 1
+    initial_value: 10
+    restore_value: true
+    unit_of_measurement: "s"
+    entity_category: config
+  - platform: template
+    name: "PIR Hold Seconds"
+    id: pir_hold_s
+    optimistic: true
+    min_value: 1
+    max_value: 60
+    step: 1
+    initial_value: 5
+    restore_value: true
+    unit_of_measurement: "s"
+    entity_category: config
+  - platform: template
+    name: "Radar Write Interval Seconds"
+    id: smart_write_gap_s
+    optimistic: true
+    min_value: 10
+    max_value: 300
+    step: 5
+    initial_value: 30
+    restore_value: true
+    unit_of_measurement: "s"
+    entity_category: config
+  - platform: template
+    name: "Radar Settling Seconds"
+    id: settle_s
+    optimistic: true
+    min_value: 3
+    max_value: 60
+    step: 1
+    initial_value: 12
+    restore_value: true
+    unit_of_measurement: "s"
+    entity_category: config
+  - platform: template
+    name: "PIR Mismatch Seconds"
+    id: pir_mismatch_s
+    optimistic: true
+    min_value: 1
+    max_value: 30
+    step: 1
+    initial_value: 3
+    restore_value: true
+    unit_of_measurement: "s"
+    entity_category: config
+  # 3.4：校準品質提示與干擾格辨識的門檻（暫定值，只用來提示，不會自動改任何門檻）。
+  # 干擾格用「相對於同一台其他格」的比例，不用絕對能量，所以不綁特定地點。
+  - platform: template
+    name: "Calibration Spread Limit"
+    id: cal_spread_limit
+    optimistic: true
+    min_value: 5
+    max_value: 100
+    step: 1
+    initial_value: 20
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: "Interference Ratio"
+    id: intf_ratio
+    optimistic: true
+    min_value: 1.5
+    max_value: 10
+    step: 0.5
+    initial_value: 2.5
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: "Interference Min Gap"
+    id: intf_gap
+    optimistic: true
+    min_value: 2
+    max_value: 50
+    step: 1
+    initial_value: 10
+    restore_value: true
+    entity_category: config
+  # 3.2 進入遲滯：智慧延時開著時，從無人轉有人要「能量 ≥ 該格門檻＋這個值」或 PIR 觸發；0＝關閉
+  - platform: template
+    name: "Hysteresis Margin"
+    id: hyst_margin
+    optimistic: true
+    min_value: 0
+    max_value: 30
+    step: 1
+    initial_value: 5
+    restore_value: true
+    mode: box
+    entity_category: config
+  # 3.1：雷達底層逾時（internal）。對外的 Radar Presence Timeout 是範本數字：智慧延時關著時寫進雷達，開著時雷達固定 1 秒、由 ESP32 計時
+  - platform: template
+    name: "Radar Presence Timeout"
+    id: radar_timeout
+    optimistic: true
+    min_value: 0
+    max_value: 3600
+    step: 1
+    initial_value: 5
+    restore_value: true
+    unit_of_measurement: "s"
+    mode: box
+    entity_category: config
+    on_value:
+      then:
+        - lambda: |-
+            if (id(smart_active) || !id(tmo_synced) || !id(radar_timeout_hw).has_state()) return;
+            if (fabsf(id(radar_timeout_hw).state - x) < 0.5f) return;
+            auto call = id(radar_timeout_hw).make_call();
+            call.set_value(x);
+            call.perform();
+  - platform: ld2410
+    timeout:
+      name: "Radar Timeout Hardware"
+      id: radar_timeout_hw
+      internal: true
+    max_move_distance_gate:
+      name: "Radar Max Move Gate"
+      id: radar_max_move
+      on_value:
+        # 3.4：從網頁／HA 直接改最遠格會讓雷達重開（ld2410.cpp set_max_distances_timeout）→ 值真的變了才開穩定期（開機第一次回報不算）
+        - lambda: |-
+            static float last = NAN;
+            if (!std::isnan(last) && last != x) id(radar_settle).execute();
+            last = x;
+    max_still_distance_gate:
+      name: "Radar Max Still Gate"
+      id: radar_max_still
+      on_value:
+        # 3.4：從網頁／HA 直接改最遠格會讓雷達重開（ld2410.cpp set_max_distances_timeout）→ 值真的變了才開穩定期（開機第一次回報不算）
+        - lambda: |-
+            static float last = NAN;
+            if (!std::isnan(last) && last != x) id(radar_settle).execute();
+            last = x;
+    light_threshold:
+      name: "Radar Light Threshold"
+    g0:
+      move_threshold:
+        name: "Gate 0 Move Threshold"
+        id: g0_move_threshold
+      still_threshold:
+        name: "Gate 0 Still Threshold"
+        id: g0_still_threshold
+    g1:
+      move_threshold:
+        name: "Gate 1 Move Threshold"
+        id: g1_move_threshold
+      still_threshold:
+        name: "Gate 1 Still Threshold"
+        id: g1_still_threshold
+    g2:
+      move_threshold:
+        name: "Gate 2 Move Threshold"
+        id: g2_move_threshold
+      still_threshold:
+        name: "Gate 2 Still Threshold"
+        id: g2_still_threshold
+    g3:
+      move_threshold:
+        name: "Gate 3 Move Threshold"
+        id: g3_move_threshold
+      still_threshold:
+        name: "Gate 3 Still Threshold"
+        id: g3_still_threshold
+    g4:
+      move_threshold:
+        name: "Gate 4 Move Threshold"
+        id: g4_move_threshold
+      still_threshold:
+        name: "Gate 4 Still Threshold"
+        id: g4_still_threshold
+    g5:
+      move_threshold:
+        name: "Gate 5 Move Threshold"
+        id: g5_move_threshold
+      still_threshold:
+        name: "Gate 5 Still Threshold"
+        id: g5_still_threshold
+    g6:
+      move_threshold:
+        name: "Gate 6 Move Threshold"
+        id: g6_move_threshold
+      still_threshold:
+        name: "Gate 6 Still Threshold"
+        id: g6_still_threshold
+    g7:
+      move_threshold:
+        name: "Gate 7 Move Threshold"
+        id: g7_move_threshold
+      still_threshold:
+        name: "Gate 7 Still Threshold"
+        id: g7_still_threshold
+    g8:
+      move_threshold:
+        name: "Gate 8 Move Threshold"
+        id: g8_move_threshold
+      still_threshold:
+        name: "Gate 8 Still Threshold"
+        id: g8_still_threshold
+  # 溫濕度補償：通用版預設 0（每台板子的偏差不同，要拿參考溫濕度計對照後自己填）
+  - platform: template
+    name: "Temperature Offset"
+    id: temp_offset
+    optimistic: true
+    min_value: -40
+    max_value: 40
+    step: 0.1
+    initial_value: ${temp_offset_default}
+    restore_value: true
+    unit_of_measurement: "°C"
+    mode: box
+    entity_category: config
+  - platform: template
+    name: "Humidity Offset"
+    id: humi_offset
+    optimistic: true
+    min_value: -50
+    max_value: 50
+    step: 0.1
+    initial_value: ${humi_offset_default}
+    restore_value: true
+    unit_of_measurement: "%"
+    mode: box
+    entity_category: config
+  # 校準參數
+  - platform: template
+    name: "Calibration Start Delay"
+    id: cal_delay
+    optimistic: true
+    min_value: 0
+    max_value: 120
+    step: 1
+    initial_value: 15
+    restore_value: true
+    unit_of_measurement: "s"
+    mode: box
+    entity_category: config
+  - platform: template
+    name: "Calibration Duration"
+    id: cal_duration
+    optimistic: true
+    min_value: 10
+    max_value: 300
+    step: 1
+    initial_value: 120
+    restore_value: true
+    unit_of_measurement: "s"
+    mode: box
+    entity_category: config
+  # 2.9 雙點校準：空房取樣後，請回到平常待的位置坐著不動，取這段時間（前 10 秒是走回座位的緩衝，不取樣）
+  - platform: template
+    name: "Calibration Sit Duration"
+    id: cal_sit_duration
+    optimistic: true
+    min_value: 10
+    max_value: 120
+    step: 1
+    initial_value: 30
+    restore_value: true
+    unit_of_measurement: "s"
+    mode: box
+    entity_category: config
+  - platform: template
+    name: "Calibration Margin"
+    id: cal_margin
+    optimistic: true
+    min_value: 0
+    max_value: 50
+    step: 1
+    initial_value: 10
+    restore_value: true
+    unit_of_measurement: "%"
+    mode: box
+    entity_category: config
+  - platform: template
+    name: "Engineering Auto Off"
+    id: eng_auto_off_min
+    optimistic: true
+    min_value: 1
+    max_value: 60
+    step: 1
+    initial_value: 10
+    restore_value: true
+    unit_of_measurement: "min"
+    mode: box
+    entity_category: config
+  - platform: template
+    name: "Buzzer Volume"
+    id: buzzer_volume
+    optimistic: true
+    min_value: 0
+    max_value: 100
+    step: 5
+    initial_value: 80
+    restore_value: true
+    unit_of_measurement: "%"
+    mode: slider
+    entity_category: config
+    on_value:
+      - lambda: 'id(buzzer_rtttl).set_gain(x / 100.0f);'
+
+text:
+  # 裝置名稱存在裝置裡，網頁標題與瀏覽器分頁用
+  - platform: template
+    name: "Device Name"
+    id: device_name
+    entity_category: config
+    mode: text
+    max_length: 40
+    optimistic: true
+    restore_value: true
+    initial_value: "${device_label}"
+  # 試播用，不存進裝置
+  - platform: template
+    name: "Buzzer Melody"
+    id: buzzer_melody
+    entity_category: config
+    mode: text
+    max_length: 255
+    optimistic: true
+    initial_value: "motion:d=32,o=6,b=200:e,16p,g"
+  # 下面兩個只給網頁換 Wi-Fi 用，不進 HA。password 模式不會把內容傳給瀏覽器
+  - platform: template
+    name: "WiFi New SSID"
+    id: wifi_new_ssid
+    internal: true
+    mode: text
+    max_length: 32
+    optimistic: true
+  - platform: template
+    name: "WiFi New Password"
+    id: wifi_new_password
+    internal: true
+    mode: password
+    max_length: 64
+    optimistic: true
+
+select:
+  # 3.3 無人逾時情境（秒數只放這裡；目前值對不上任何一項時顯示 Custom）
+  - platform: template
+    name: "Presence Timeout Preset"
+    id: timeout_preset
+    options: ["Work 60 s", "Sleep 120 s", "Away 5 s", "Custom"]
+    initial_option: "Custom"
+    optimistic: true
+    entity_category: config
+    set_action:
+      - lambda: |-
+          float v = x == "Work 60 s" ? 60 : x == "Sleep 120 s" ? 120 : x == "Away 5 s" ? 5 : -1;
+          if (v < 0) return;
+          auto c = id(radar_timeout).make_call(); c.set_value(v); c.perform();
+  - platform: ld2410
+    distance_resolution:
+      name: "Radar Distance Resolution"
+      id: radar_res
+      on_value:
+        # 3.4：改解析度也會讓雷達重開 → 選項真的變了才開穩定期
+        - lambda: |-
+            static std::string last;
+            if (!last.empty() && last != x) id(radar_settle).execute();
+            last = x;
+    light_function:
+      name: "Radar Light Function"
+    out_pin_level:
+      name: "Radar OUT Pin Level"
+
+switch:
+  # N11 smart delay (default off): still target near for 10 s -> extend; all targets far for 2 s -> shorten;
+  # presence off or switch off restores the base timeout. Each write restarts the radar (2-3 s blind, engineering
+  # mode drops), so writes are rare: see smart_delay_tick.
+  - platform: template
+    name: "Smart Delay"
+    id: smart_delay
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    entity_category: config
+  # 2.9 雙點校準開關（預設關）：開著時裝置端校準在空房取樣後多一段「坐著取樣」，靜止門檻不會設到把坐著的人漏掉
+  - platform: template
+    name: "Calibration Two Point"
+    id: cal_two
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    entity_category: config
+  # 3.8 校準品質「不穩」時不寫入門檻（預設開）；關掉則照寫但狀態標示警告
+  # 4.3.2：「這顆做過校準」旗標，重開機保留（校準完成時間是執行期文字，重開就清空，不能拿來判斷）。
+  # 網頁的調校精靈／橫幅靠它判斷要不要提示；校準成功時自動開，原廠重置時關，也可手動開關。
+  - platform: template
+    name: "Calibration Done"
+    id: calibration_done
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    entity_category: diagnostic
+  - platform: template
+    name: "Calibration Block Unstable"
+    id: cal_block_unstable
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    entity_category: config
+  # 3.0 歷史學習（預設開，只收資料不改門檻）與自動套用（預設關）
+  - platform: template
+    name: "History Learning"
+    id: hist_learn
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    entity_category: config
+  - platform: template
+    name: "History Auto Apply"
+    id: hist_auto
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    entity_category: config
+  - platform: ld2410
+    engineering_mode:
+      name: "Radar Engineering Mode"
+      id: ld2410_engineering
+      # 開著會讓雷達持續回報各格能量、裝置負擔變高：開了就計時，逾時自動關（保險）
+      # 2.9: a re-open after a smart-delay write keeps the original deadline (2.8 restarted it on every write)
+      on_turn_on:
+        - lambda: |-
+            static const char *const OW[5] = {"user", "calibration", "smart_reopen", "floor_drift", "history"};
+            int o = id(cal_running) ? 1 : (id(eng_reopen) ? 2 : id(eng_owner_next));
+            id(eng_owner_next) = 0;
+            // 智慧延時重開時沿用原本的擁有者以外的標記（磚據此不標警告）
+            id(eng_owner_ts).publish_state(OW[o < 0 || o > 4 ? 0 : o]);
+        - if:
+            condition:
+              lambda: 'return id(eng_reopen) && id(eng_auto_off).is_running();'
+            then:
+              - lambda: 'id(eng_reopen) = false;'
+            else:
+              - lambda: 'id(eng_reopen) = false;'
+              - script.execute: eng_auto_off
+      on_turn_off:
+        - lambda: |-
+            if (!id(eng_reopen)) {
+              id(eng_owner_ts).publish_state("off");
+              id(eng_off_at).publish_state("");
+            }
+  # 雷達自帶藍牙開關（進階，小心）：關掉後只能讓感應器斷電再上電 5 次以上才能重開，網頁與 HA 都開不回來。
+  # 狀態由「Radar MAC」查詢結果推得（沒有 MAC 就當成關），不是雷達直接回報；不還原、不在開機時寫入
+  - platform: ld2410
+    bluetooth:
+      name: "Radar Bluetooth"
+      id: radar_bluetooth
+      restore_mode: DISABLED
+  # 蜂鳴器與報時預設全關
+  - platform: template
+    name: "Sounds"
+    id: sounds
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    entity_category: config
+  - platform: template
+    name: "Hourly Chime"
+    id: hourly_chime
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    entity_category: config
+  # 燈珠預設關：開了才會跟著有人、PIR 跑馬；燈本身仍可在網頁或 HA 手動開
+  - platform: template
+    name: "LED Follow Sensors"
+    id: led_follow
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    entity_category: config
+    # 4.2：打開當下若已經有人／PIR 有動作，立刻亮（原本只在下一次有人／PIR 轉變時才亮）
+    # template 開關在動作跑完之後才更新自己的狀態，所以先等一下再同步，否則 led_sync 還讀到舊的「關」而什麼都不做
+    turn_on_action:
+      - lambda: 'id(led_follow_closing) = false;'
+      - delay: 300ms
+      - script.execute: led_sync
+    # 4.3.1：關閉時①先設「關閉中」旗標，讓這段空檔的有人／PIR 觸發不再點燈 ②左右兩段立即熄（不漸暗）
+    # ③1 秒後若仍是關著、且燈珠沒被校準或 Wi-Fi 斷線閃紅占用，把整條 6 顆像素強制寫成黑色，清掉可能殘留的跑馬像素
+    turn_off_action:
+      - lambda: 'id(led_follow_closing) = true;'
+      - light.turn_off:
+          id: ws2812_left
+          transition_length: 0s
+      - light.turn_off:
+          id: ws2812_right
+          transition_length: 0s
+      - delay: 1s
+      - if:
+          condition:
+            lambda: 'return !id(led_follow).state && !id(cal_running) && !(id(led_status).state && !wifi::global_wifi_component->is_connected());'
+          then:
+            - light.addressable_set:
+                id: ws2812
+                range_from: 0
+                range_to: 5
+                red: 0%
+                green: 0%
+                blue: 0%
+      - lambda: 'id(led_follow_closing) = false;'
+  # 狀態燈預設關：開了，校準時 6 顆藍色呼吸，Wi-Fi 斷線時 6 顆紅色閃爍
+  - platform: template
+    name: "LED Status Indicator"
+    id: led_status
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    entity_category: config
+
+button:
+  - platform: template
+    name: "Radar Floor Reference Reset"
+    entity_category: config
+    on_press:
+      - lambda: 'id(floor_ref) = (id(floor_n) >= 6) ? id(floor_level) : -1.0f;'
+  - platform: template
+    name: "Radar Factory Calibrate"
+    id: radar_factory_cal_btn
+    icon: "mdi:tune-variant"
+    entity_category: config
+    on_press:
+      - if:
+          condition:
+            lambda: 'return !id(cal_running);'
+          then:
+            - lambda: 'id(ld2410_hub)->start_factory_calibration(60);'
+            - script.execute: radar_settle
+            # 校準完成後雷達內門檻已改寫，等 75 秒後重讀，網頁與 HA 才會跟上（不重讀會停在舊值）
+            - delay: 75s
+            - button.press: radar_query_btn
+  - platform: ld2410
+    restart:
+      name: "Radar Restart"
+      id: radar_restart_btn
+    query_params:
+      name: "Radar Query Params"
+      id: radar_query_btn
+    factory_reset:
+      name: "Radar Factory Reset"
+      id: radar_factory_reset_btn
+  - platform: restart
+    name: "Restart"
+    id: esp_restart_btn
+    entity_category: config
+  - platform: template
+    name: "Buzzer Test"
+    entity_category: config
+    on_press:
+      - rtttl.play: "motion:d=32,o=6,b=200:e,16p,g"
+  - platform: template
+    name: "History Apply"
+    icon: "mdi:history"
+    on_press:
+      - lambda: 'id(hist_clamp) = false;'
+      - script.execute: hist_apply
+  - platform: template
+    name: "History Undo"
+    icon: "mdi:undo"
+    on_press:
+      - script.execute: hist_undo
+  - platform: template
+    name: "History Reset"
+    id: hist_reset_btn
+    entity_category: config
+    on_press:
+      - lambda: |-
+          memset(id(hq), 0, sizeof(id(hq)));
+          memset(id(ho), 0, sizeof(id(ho)));
+          memset(id(hq_save), 0, sizeof(id(hq_save)));
+          memset(id(ho_save), 0, sizeof(id(ho_save)));
+          id(hist_status).publish_state("Reset");
+      - script.execute: hist_compute
+  # 3.3 兩顆還原：都不動名稱、Wi-Fi；網頁按前先在瀏覽器備份
+  - platform: template
+    name: "Restore Recommended"
+    icon: "mdi:backup-restore"
+    entity_category: config
+    on_press:
+      - script.execute:
+          id: restore_settings
+          factory: false
+  - platform: template
+    name: "Restore Factory Defaults"
+    icon: "mdi:restore-alert"
+    entity_category: config
+    on_press:
+      - script.execute:
+          id: restore_settings
+          factory: true
+  - platform: template
+    name: "Reset Spike Count"
+    entity_category: config
+    on_press:
+      - lambda: 'id(spike_count) = 0;'
+  - platform: template
+    name: "Reset PIR Mismatch Count"
+    entity_category: config
+    on_press:
+      - lambda: 'id(pir_mismatch) = 0;'
+  - platform: template
+    name: "Auto Calibrate"
+    icon: "mdi:tune"
+    on_press:
+      # 3.6：歷史套用／復原剛結束的瞬間不開始校準（歷史腳本結尾會把 cal_running 設回 false，蓋掉校準自己的旗標）
+      - if:
+          condition:
+            lambda: 'return !id(cal_running) && !id(write_thr).is_running();'
+          then:
+            - script.execute: auto_calibrate
+  - platform: template
+    name: "Restore Calibration"
+    icon: "mdi:undo"
+    on_press:
+      - script.execute: cal_restore
+  - platform: template
+    name: "Cancel Calibration"
+    entity_category: config
+    on_press:
+      - script.stop: auto_calibrate
+      - switch.turn_off: ld2410_engineering
+      - lambda: 'id(cal_running) = false;'
+      - if:
+          condition:
+            switch.is_on: led_status
+          then:
+            - light.turn_off: ws2812
+            - script.execute: led_sync
+      - lambda: 'id(cal_status).publish_state("Cancelled");'
+  - platform: template
+    name: "Buzzer Play Melody"
+    entity_category: config
+    on_press:
+      - rtttl.play: !lambda 'return id(buzzer_melody).state;'
+  # 換 SSID：連不上時 wifi.configure 會自動退回原本的
+  # 同 SSID：wifi.configure 不動作，改成只存新密碼，不斷線，路由器改密碼後用新密碼連
+  - platform: template
+    name: "WiFi Apply"
+    internal: true
+    on_press:
+      then:
+        - if:
+            condition:
+              lambda: |-
+                char current[wifi::SSID_BUFFER_SIZE];
+                return id(wifi_new_ssid).state == wifi::global_wifi_component->wifi_ssid_to(current);
+            then:
+              - lambda: 'wifi::global_wifi_component->save_wifi_sta(id(wifi_new_ssid).state, id(wifi_new_password).state);'
+            else:
+              - wifi.configure:
+                  ssid: !lambda 'return id(wifi_new_ssid).state;'
+                  password: !lambda 'return id(wifi_new_password).state;'
+                  save: true
+                  timeout: 30s
+        - text.set:
+            id: wifi_new_password
+            value: ""
+
+text_sensor:
+  - platform: template
+    name: "Radar Factory Calibration"
+    id: radar_factory_cal_text
+    icon: "mdi:tune-variant"
+    update_interval: 1s
+    # 3.5：狀態沒變就不送（原本每秒送一次相同的字，佔掉一個實體每秒一筆事件、全是重複）
+    # 3.8：固定代碼 running／success／failed／none（網頁自己翻譯）；結束後保留上次結果，完成時間另送 Radar Factory Calibration Finished At
+    lambda: |-
+      static std::string last = "none", shown;
+      static bool running = false;
+      int raw = id(ld2410_hub)->get_target_state_raw();
+      std::string want;
+      if (raw == 4) { running = true; want = "running"; }
+      else {
+        if (raw == 5 || raw == 6 || running) {
+          if (raw == 5) last = "success"; else if (raw == 6) last = "failed";
+          auto tm = id(sntp_time).now();
+          if (tm.is_valid()) id(factory_cal_finished_at).publish_state(ESPTime::from_epoch_utc(tm.timestamp).strftime("%Y-%m-%dT%H:%M:%SZ"));
+        }
+        running = false;
+        want = last;
+      }
+      if (want == shown) return {};
+      shown = want;
+      return want;
+  - platform: template
+    name: "Calibration Status"
+    id: cal_status
+    icon: "mdi:tune"
+    # 3.3：人看的字串不變；機器讀的階段、預估結束時間與結果另外送
+    on_value:
+      - lambda: |-
+          const std::string &s = x;
+          auto st = [&](const char *p) { return s.rfind(p, 0) == 0; };
+          float dl = id(cal_delay).state, du = id(cal_duration).state, sit = id(cal_sit_duration).state;
+          float seat = id(cal_two).state ? sit + 10 : 0;
+          const char *ph = nullptr; float rem = NAN; const char *fail = nullptr;
+          // 3.8 還原校準：只動階段與「進行中」旗標，不碰上次校準的完成時間與結果
+          if (st("Restor")) {
+            bool r = st("Restoring");
+            id(cal_phase_ts).publish_state(r ? "restoring" : "idle");
+            id(cal_active_bs).publish_state(r);
+            return;
+          }
+          if (st("Leave")) { ph = "wait_leave"; rem = dl + du + 3 + seat + 6; id(cal_total_s).publish_state(rem); }
+          else if (st("Sampling")) { ph = "sampling_empty"; rem = du + 3 + seat + 6; }
+          else if (st("Sit still")) { ph = "wait_seated"; rem = sit + 10 + 6; }
+          else if (st("Seated")) { ph = "sampling_seated"; rem = sit + 6; }
+          else if (st("Writing")) { ph = "writing"; rem = id(cal_two).state ? 6 : 3; }
+          else if (st("Verifying")) { ph = "verifying"; rem = 3; }
+          else if (st("Done")) ph = id(cal_unstable) ? "done_warning" : "done";
+          else if (st("Failed: radar parameters")) { ph = "failed"; fail = "params_not_read"; }
+          else if (st("Failed")) { ph = "failed"; fail = "no_data"; }
+          else if (st("Aborted: unstable")) { ph = "aborted"; fail = "unstable"; }
+          else if (st("Aborted")) { ph = "aborted"; fail = "someone_in_room"; }
+          else if (st("Cancelled")) { ph = "cancelled"; fail = "cancelled"; }
+          if (ph == nullptr) return;
+          id(cal_phase_ts).publish_state(ph);
+          bool active = !std::isnan(rem);
+          id(cal_active_bs).publish_state(active);
+          auto tm = id(sntp_time).now();
+          id(cal_ends_at).publish_state(active && tm.is_valid() ? ESPTime::from_epoch_utc(tm.timestamp + (int) rem).strftime("%Y-%m-%dT%H:%M:%SZ") : std::string());
+          if (active) return;
+          if (tm.is_valid()) id(cal_finished_at).publish_state(ESPTime::from_epoch_utc(tm.timestamp).strftime("%Y-%m-%dT%H:%M:%SZ"));
+          id(cal_fail_ts).publish_state(fail ? fail : "none");
+          if (fail) return;
+          id(calibration_done).turn_on();
+          id(cr_samples).publish_state(id(cal_samples));
+          id(cr_used_hist).publish_state(id(cal_used_hist));
+          id(cr_seat_skipped).publish_state(id(cal_skip_sit));
+          id(cr_seat_gates).publish_state(id(cal_sit_n) > 0 ? id(cal_seat_sig) : 0);
+          id(cr_seat_seen).publish_state(id(cal_verify) == 1);
+  # 只給網頁顯示，不進 HA，免得每 10 秒多一筆歷史
+  - platform: template
+    name: "Device Time"
+    internal: true
+    update_interval: 10s
+    lambda: |-
+      auto now = id(sntp_time).now();
+      if (!now.is_valid()) return {"尚未校時"};
+      return now.strftime("%Y-%m-%d %H:%M:%S");
+  # 觸發日誌與底噪統計只給網頁用，不進 HA（免得多筆歷史）
+  - platform: template
+    name: "Trigger Log"
+    id: trigger_log_text
+    internal: true
+  # 3.0: suggestion / backup as 18 comma-separated values (order = gate 0 moving, gate 0 still, gate 1 moving ...); web only
+  # 3.4 校準品質提示：空房取樣的「最大值 − 平均」在第 2～8 格任何一個值超過 Calibration Spread Limit，
+  # 代表取樣時環境不穩（冷氣、風扇、有人經過），門檻可能偏高；只提示，不改門檻
+  - platform: template
+    name: "Calibration Quality"
+    id: cal_quality_ts
+    entity_category: diagnostic
+  # 3.4 干擾格辨識：歷史空房資料（需夠用）裡，第 2～8 格某一格的中位數能量明顯高於其他格
+  # （≥ Interference Ratio 倍且至少高 Interference Min Gap），代表那一方向長期有干擾源（風扇、冷氣、窗簾…）
+  # 第 0、1 格不判（雷達近場本來就有高能量）。只提示，不改門檻
+  - platform: template
+    name: "Interference Gates"
+    id: intf_gates_ts
+    entity_category: diagnostic
+  # 3.4 開機自檢：可調數字有空值或超出範圍時回預設，這裡記錄結果（ok／reset N invalid value(s) to default）
+  - platform: template
+    name: "Config Check"
+    id: config_check_ts
+    entity_category: diagnostic
+  - platform: template
+    name: "History Suggestion"
+    id: hist_sug_text
+    internal: true
+  - platform: template
+    name: "History Backup"
+    id: hist_bak_text
+    internal: true
+  - platform: template
+    name: "History Status"
+    id: hist_status
+    icon: "mdi:history"
+  - platform: template
+    name: "Noise Max"
+    id: noise_max_text
+    internal: true
+  - platform: template
+    name: "Noise Avg"
+    id: noise_avg_text
+    internal: true
+  - platform: ld2410
+    version:
+      name: "Radar Firmware"
+    mac_address:
+      name: "Radar MAC"
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+    ssid:
+      name: "Connected SSID"
+    mac_address:
+      name: "WiFi MAC"
+    # 開機時掃到的 SSID，網頁換 Wi-Fi 的選單用，不進 HA
+    scan_results:
+      name: "WiFi Scan"
+      internal: true
+  # 3.1 自製韌體版本（網頁標題副列與系統頁用；ESPHome Version 是 ESPHome 框架版本，不是這份韌體的版本）
+  - platform: template
+    name: "Firmware Version"
+    id: fw_version
+    entity_category: diagnostic
+    update_interval: 1h
+    lambda: 'return {"${firmware_version}"};'
+  # 3.2 有人狀態機（Empty／Entering／Moving／Still／Leaving），智慧延時關著時只供顯示
+  - platform: template
+    name: "Presence State"
+    id: pres_state_text
+    icon: "mdi:account-question"
+  # 3.2 為什麼判定有人（給網頁，internal 不送 HA）：m,格,能量,門檻;s,格,能量,門檻;p,PIR;r,殘留;h,保持中
+  - platform: template
+    name: "Presence Reason"
+    id: pres_reason
+    internal: true
+  # 3.2 OTA 失敗自動退回（ESP-IDF＋safe_mode：新版開機 1 分鐘內重開就退回上一版）
+  - platform: template
+    name: "OTA Rollback"
+    id: ota_rollback
+    entity_category: diagnostic
+    update_interval: 1h
+    lambda: |-
+      #ifdef USE_OTA_ROLLBACK
+      const esp_partition_t *run = esp_ota_get_running_partition();
+      const esp_partition_t *inv = esp_ota_get_last_invalid_partition();
+      std::string r = std::string("on, ") + (run ? run->label : "?");
+      if (inv) r += std::string(", rolled back from ") + inv->label;
+      return r;
+      #else
+      return {"off"};
+      #endif
+  # 3.3 機器讀的實體（HA 磚、網頁共用；鍵值固定英文）
+  - platform: template
+    name: "Web Version"
+    id: web_version_ts
+    entity_category: diagnostic
+    update_interval: never
+  - platform: template
+    name: "Capabilities"
+    id: capabilities_ts
+    entity_category: diagnostic
+    update_interval: never
+  - platform: template
+    name: "Calibration Phase"
+    id: cal_phase_ts
+    entity_category: diagnostic
+    update_interval: never
+  - platform: template
+    name: "Calibration Failure Reason"
+    id: cal_fail_ts
+    entity_category: diagnostic
+    update_interval: never
+  - platform: template
+    name: "Smart Delay Mode"
+    id: smart_mode_ts
+    entity_category: diagnostic
+    update_interval: never
+  - platform: template
+    name: "Engineering Mode Owner"
+    id: eng_owner_ts
+    entity_category: diagnostic
+    update_interval: never
+  - platform: template
+    name: "Restore Status"
+    id: restore_status_ts
+    entity_category: diagnostic
+    update_interval: never
+  - platform: template
+    name: "Calibration Ends At"
+    id: cal_ends_at
+    device_class: timestamp
+    entity_category: diagnostic
+    update_interval: never
+  # 3.8 有人狀態最後變動時間（轉有人＝開始有人的時間；轉無人＝最後離開、空房起算的時間）；開機後第一次變動前是空值
+  - platform: template
+    name: "Presence Changed At"
+    id: presence_changed_at
+    device_class: timestamp
+    entity_category: diagnostic
+    update_interval: never
+  - platform: template
+    name: "Radar Factory Calibration Finished At"
+    id: factory_cal_finished_at
+    device_class: timestamp
+    entity_category: diagnostic
+    update_interval: never
+  - platform: template
+    name: "Calibration Backup At"
+    id: cal_backup_at_ts
+    device_class: timestamp
+    entity_category: diagnostic
+    update_interval: never
+  - platform: template
+    name: "Calibration Backup"
+    id: cal_backup_text
+    internal: true
+  - platform: template
+    name: "Calibration Finished At"
+    id: cal_finished_at
+    device_class: timestamp
+    entity_category: diagnostic
+    update_interval: never
+  - platform: template
+    name: "Engineering Mode Off At"
+    id: eng_off_at
+    device_class: timestamp
+    entity_category: diagnostic
+    update_interval: never
+  - platform: template
+    name: "Last Spike Time"
+    id: last_spike_time
+    device_class: timestamp
+    entity_category: diagnostic
+    update_interval: never
+  - platform: version
+    name: "ESPHome Version"
+  - platform: debug
+    device:
+      name: "Device Info"
+    reset_reason:
+      name: "Reset Reason"
+
+# 裝置端底噪校準：離開房間後開始，期間開工程模式取樣各格最大能量，
+# 結束時把「最大值＋餘裕」寫回各格門檻（上限 100），再關工程模式。
+script:
+  # 4.2：依目前狀態重新同步「跟著感測器」的兩組燈（左三顆＝雷達有人、右三顆＝PIR）。
+  # 補三個原本不會自己補亮的時機：①LED Follow Sensors 剛打開（人已在場）②Wi-Fi 連上、狀態燈熄整排之後 ③校準結束、狀態燈熄整排之後。
+  # 左右燈是 ws2812 整條的分段，熄整排會連帶熄掉它們；校準中與 Wi-Fi 斷線閃紅時燈歸狀態燈管，不同步
+  - id: led_sync
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: 'return id(led_follow).state && !id(cal_running) && !(id(led_status).state && !wifi::global_wifi_component->is_connected());'
+          then:
+            - if:
+                condition:
+                  binary_sensor.is_on: presence
+                then:
+                  - light.turn_on:
+                      id: ws2812_left
+                      brightness: !lambda 'return id(led_brightness).state / 100.0f;'
+                      effect: "Left Flow"
+                else:
+                  - light.turn_off: ws2812_left
+            - if:
+                condition:
+                  binary_sensor.is_on: motion
+                then:
+                  - light.turn_on:
+                      id: ws2812_right
+                      brightness: !lambda 'return id(led_brightness).state / 100.0f;'
+                      effect: "Right Flow"
+                else:
+                  - light.turn_off: ws2812_right
+  # 2.8: radar link recovery: restart the radar (3 tries, 30 s apart), rest 10 min, again, then restart the ESP once
+  - id: link_recover
+    mode: single
+    then:
+      - delay: 10s
+      - lambda: 'id(link_attempts) = 0;'
+      - while:
+          condition:
+            lambda: 'return !id(link_was_ok);'
+          then:
+            - lambda: 'id(link_attempts)++;'
+            - button.press: radar_restart_btn
+            - delay: 30s
+            - if:
+                condition:
+                  lambda: 'return !id(link_was_ok) && id(link_attempts) >= 6;'
+                then:
+                  - button.press: esp_restart_btn
+            - if:
+                condition:
+                  lambda: 'return !id(link_was_ok) && id(link_attempts) % 3 == 0;'
+                then:
+                  - delay: 10min
+      # 4.3.1：雷達恢復後確認參數有讀回（沒讀回就自動重讀）
+      - script.execute: ensure_params
+  # 4.3.1：確認雷達參數（最大格數、門檻）有讀回。開機約 20 秒後檢查；沒讀回就按 Radar Query Params，
+  # 等 10 秒看結果，沒好再等 20 秒，最多 10 次。開機或雷達重啟當下那一次讀取沒成功時，這些值會一直停在 0
+  - id: ensure_params
+    mode: restart
+    then:
+      - delay: 20s
+      - repeat:
+          count: 10
+          then:
+            - if:
+                condition:
+                  lambda: 'return id(radar_max_move).state >= 2 && id(radar_max_still).state >= 2;'
+                then:
+                  - script.stop: ensure_params
+            - lambda: 'ESP_LOGW("params", "radar parameters not read, pressing Radar Query Params");'
+            - button.press: radar_query_btn
+            - delay: 10s
+            - if:
+                condition:
+                  lambda: 'return id(radar_max_move).state >= 2 && id(radar_max_still).state >= 2;'
+                then:
+                  - script.stop: ensure_params
+            - delay: 20s
+  # 2.5: zone occupancy is recomputed only when an input changes (was a 60 s poll)
+  - id: zone_eval
+    mode: restart
+    then:
+      - lambda: |-
+          bool z[2] = {false, false};
+          if (id(presence).state) {
+            float res = ${radar_res_m};
+            int ga = -1, gb = -1;
+            if (id(radar_moving).state && !std::isnan(id(radar_move_dist).state)) ga = (int) (id(radar_move_dist).state / res);
+            if (id(radar_still).state && !std::isnan(id(radar_still_dist).state)) gb = (int) (id(radar_still_dist).state / res);
+            int a1 = (int) id(zone1_start).state, b1 = (int) id(zone1_end).state;
+            int a2 = (int) id(zone2_start).state, b2 = (int) id(zone2_end).state;
+            z[0] = (ga >= a1 && ga <= b1) || (gb >= a1 && gb <= b1);
+            z[1] = (ga >= a2 && ga <= b2) || (gb >= a2 && gb <= b2);
+            // 4.0：旗標掉線橋接中雷達沒有目標位置，區輸出維持掉線前的值，不要 4 秒後就放開（人其實還在）
+            // 4.3：旗標掉線事件可能先觸發區域重算，這時 bridging 還是上一圈的 false；
+            // 所以也直接看「雷達旗標已關但整體仍有人」，不依賴元件更新順序
+            if (id(bridging) || !id(presence_raw).state) { z[0] = id(zone1_occupied).state; z[1] = id(zone2_occupied).state; }
+          }
+          // 3.8：有人時，區輸出從有人轉無人要先保持 Zone Hold Seconds 秒（1 秒檢查一次放開）；整體無人時立刻放開
+          uint32_t now = millis();
+          uint32_t hold = (uint32_t) (std::max(0.0f, id(zone_hold_s).state) * 1000.0f);
+          binary_sensor::BinarySensor *zo[2] = {id(zone1_occupied), id(zone2_occupied)};
+          for (int i = 0; i < 2; i++) {
+            id(zone_raw)[i] = z[i] ? 1 : 0;
+            if (z[i]) id(zone_last)[i] = now;
+            if (z[i] || !id(presence).state || hold == 0 || !zo[i]->state || now - id(zone_last)[i] >= hold) zo[i]->publish_state(z[i]);
+          }
+  # N9: PIR motion but radar still says empty 3 s later -> one mismatch
+  - id: pir_check
+    mode: queued
+    max_runs: 4
+    then:
+      - delay: !lambda 'return (uint32_t) (id(pir_mismatch_s).state * 1000.0f);'
+      - if:
+          condition:
+            binary_sensor.is_off: presence
+          then:
+            - lambda: 'id(pir_mismatch)++;'
+            - binary_sensor.template.publish:
+                id: pir_mm_now
+                state: ON
+            - script.execute: pir_mm_off
+  # 3.3：PIR Mismatch Now 開 10 秒後自動關
+  - id: pir_mm_off
+    mode: restart
+    then:
+      - delay: 10s
+      - binary_sensor.template.publish:
+          id: pir_mm_now
+          state: OFF
+  # 3.3：雷達重開後的穩定期（12 秒）
+  - id: radar_settle
+    mode: restart
+    then:
+      - lambda: 'id(settle_on) = true;'
+      - binary_sensor.template.publish:
+          id: radar_settling
+          state: ON
+      - delay: !lambda 'return (uint32_t) (id(settle_s).state * 1000.0f);'
+      - lambda: 'id(settle_on) = false;'
+      - binary_sensor.template.publish:
+          id: radar_settling
+          state: OFF
+  # N11: called every 1 s from interval (2.9).
+  # 2.8 field test showed: (a) leaving, the radar reports a still-only target far away
+  # (moving flag off), so "moving and far" never fired; (b) at the desk both flags are usually on, so "still only"
+  # flickered and the timeout was rewritten every 30-60 s; (c) every timeout write restarts the radar
+  # (ld2410.cpp set_max_distances_timeout -> restart_and_read_all_info), blind for 2-3 s, once causing a false
+  # "absent" while seated. 2.9 rules:
+  #   extend  : still target within the near range for 10 s in a row (moving flag ignored)
+  #   shorten : every reported target beyond the near range for 2 s in a row (still or moving)
+  #   neither : keep the current timeout while someone is present (no write); restore base once presence is off
+  # Writes are limited to one per 30 s, except shorten (one per 5 s) so leaving is not blocked by a recent extend.
+  - id: smart_delay_tick
+    mode: single
+    then:
+      - lambda: |-
+          id(smart_wrote) = false;
+          uint32_t now = millis();
+          float res = ${radar_res_m};
+          int near_g = (int) id(delay_near).state;
+          // ---- 3.2 觀察（不論智慧延時開關都算，供狀態顯示與網頁說明）----
+          float se = id(radar_still_energy).state;
+          int rw = std::max(1, std::min(60, (int) id(residue_window).state));
+          int si = id(se_idx) % rw;
+          float se10 = id(se_hist)[si];
+          id(se_hist)[si] = (std::isnan(se) || !id(presence_raw).state) ? -1.0f : se;
+          id(se_idx) = (id(se_idx) + 1) % 6000;
+          float sd = id(radar_still_dist).state, md = id(radar_move_dist).state;
+          bool s_ok = id(radar_still).state && !std::isnan(sd), m_ok = id(radar_moving).state && !std::isnan(md);
+          bool s_near = s_ok && (int) (sd / res) <= near_g, m_near = m_ok && (int) (md / res) <= near_g;
+          bool far_only = (s_ok || m_ok) && !s_near && !m_near;
+          // 殘留回波：沒有移動目標、PIR 5 秒沒觸發（delayed_off 5s）、靜止能量 10 秒內降 ≥Residue Drop 且低於 Residue Max Energy，
+          // 連續 Residue Confirm Seconds 秒成立；成立後只要能量不回升（>最低點+Residue Rebound）、沒有移動或 PIR 就維持，最多 Residue Max Seconds 秒
+          // 3.4：五個常數改可調，預設 8／60／3／5／60 與 3.3 相同（無回放可比，靠編譯與逐項核對）
+          // 4.0.2：Residue Max Energy 預設 60→35。坐下或定下來的人，靜止能量常從 100 掉到 40–55 後穩定，舊上限 60 會把這個
+          //       正常沉降誤判成「離開殘留」→ 先判無人、橋接也被擋。
+          //       真的離開時能量會掉到底噪（約 10）附近，仍低於 35。
+          bool quietish = id(presence_raw).state && !id(radar_moving).state && !id(motion).state && !std::isnan(se);
+          // 4.1.1：Residue Drop 0＝關閉殘留規則
+          float rdrop = id(residue_drop).state;
+          if (std::isnan(rdrop) || rdrop <= 0) { id(residue) = false; id(residue_s) = 0; }
+          else if (id(residue)) {
+            if (!quietish || se > id(residue_min) + id(residue_rebound).state || now - id(residue_since) > (uint32_t) (id(residue_max_s).state * 1000.0f)) { id(residue) = false; id(residue_s) = 0; }
+            else id(residue_min) = std::min(id(residue_min), se);
+          } else {
+            bool dec = quietish && se10 >= 0 && se <= se10 - rdrop && se < id(residue_max_e).state;
+            id(residue_s) = dec ? id(residue_s) + 1 : 0;
+            if (id(residue_s) >= (int) id(residue_confirm_s).state) { id(residue) = true; id(residue_min) = se; id(residue_since) = now; ESP_LOGI("smart", "departure residue: still energy %.0f (10 s ago %.0f)", se, se10); }
+          }
+          // 4.1.1：座位距離＝最近 60 秒（有人且有靜止目標的那些秒）靜止距離的中位數，給離座軌跡判斷用
+          {
+            id(seat_hist)[id(seat_idx)] = (id(presence).state && s_ok) ? sd : 0.0f;
+            id(seat_idx) = (id(seat_idx) + 1) % 60;
+            float sv[60]; int sn = 0;
+            for (int k = 0; k < 60; k++) if (id(seat_hist)[k] > 0) sv[sn++] = id(seat_hist)[k];
+            id(seat_n) = sn;
+            if (sn == 0) id(seat_cm) = 0;
+            else { std::sort(sv, sv + sn); id(seat_cm) = (sn % 2) ? sv[sn / 2] : (sv[sn / 2 - 1] + sv[sn / 2]) / 2.0f; }
+          }
+          // 4.1.1：雷達旗標關著但靜止能量夠高的連續秒數（Radar Presence 範本用）
+          {
+            float ep = id(energy_pres).state;
+            id(e_run) = (!id(presence_raw).state && !std::isnan(ep) && ep > 0 && !std::isnan(se) && se >= ep) ? std::min(id(e_run) + 1, 1000) : 0;
+          }
+          // 4.0：單秒距離突跳 >= 1.5 格的遠處目標是鬼影或跳格，不算「遠離」（真的離開是逐步走遠）；
+          // 封鎖到看見近處目標，或遠處持續 10 秒（慢慢真的走掉）為止
+          {
+            float dnow = NAN;
+            if (s_ok) dnow = sd;
+            if (m_ok && (std::isnan(dnow) || md < dnow)) dnow = md;
+            int dcm = std::isnan(dnow) ? 0 : (int) dnow;
+            if (!id(presence).state || s_near || m_near) { id(far_block) = false; id(far_block_s) = 0; }
+            else if (far_only && !id(far_block) && id(smart_far_s) == 0 && id(smart_prev_d) > 0 && dcm - id(smart_prev_d) >= (int) (res * 150.0f)) { id(far_block) = true; id(far_block_s) = 0; }
+            if (id(far_block)) { id(far_block_s) = far_only ? id(far_block_s) + 1 : id(far_block_s); if (id(far_block_s) >= 10) id(far_block) = false; }
+            id(smart_prev_d) = dcm;
+          }
+          if (!id(presence).state) { id(smart_near_s) = 0; id(smart_far_s) = 0; }
+          else {
+            id(smart_near_s) = s_near ? std::min(id(smart_near_s) + 1, 1000) : 0;
+            id(smart_far_s) = (far_only && !id(far_block)) ? std::min(id(smart_far_s) + 1, 1000) : 0;
+          }
+          // 狀態：0 Empty、1 Entering（轉有人 10 秒內）、2 Moving、3 Still（近處靜止滿 10 秒）、4 Leaving（殘留或只剩遠處 2 秒）
+          int stt;
+          if (!id(presence).state) stt = 0;
+          else if (id(residue) || id(smart_far_s) >= (int) id(delay_away_s).state) stt = 4;
+          else if (id(smart_near_s) >= (int) id(delay_still_s).state) stt = 3;
+          else if (now - id(pres_on_ms) < (uint32_t) (id(entering_s).state * 1000.0f)) stt = 1;
+          else stt = 2;
+          id(pres_state) = stt;
+          // 3.8：對外顯示的狀態字要連續維持 State Smooth Seconds 秒才換（變成 Empty 立即換）；判斷與逾時邏輯仍用即時的 stt
+          {
+            int sm = std::max(0, (int) id(state_smooth_s).state);
+            if (stt == id(pres_cand)) id(pres_cand_s) = std::min(id(pres_cand_s) + 1, 1000);
+            else { id(pres_cand) = stt; id(pres_cand_s) = 1; }
+            // 4.0：從 Empty 變有人立即換（presence 已 ON 文字卻還是 Empty 的 3–4 秒是矛盾的），只有「有人狀態之間」才平滑
+            if (stt != id(pres_shown) && (stt == 0 || id(pres_shown) <= 0 || id(pres_cand_s) > sm)) {
+              static const char *const NM[5] = {"Empty", "Entering", "Moving", "Still", "Leaving"};
+              id(pres_shown) = stt;
+              id(pres_state_text).publish_state(NM[stt]);
+            }
+          }
+          // 為什麼判定有人（網頁用）
+          {
+            // 3.5：用堆疊上的字元陣列組字串（原本每秒配置一次 std::string），內容沒變就不送
+            char rs[96];
+            rs[0] = '\0';
+            if (id(presence_raw).state || id(presence).state) {
+              number::Number *mt[9] = {${gates_thr_move_9}};
+              number::Number *st[9] = {${gates_thr_still_9}};
+              size_t n = 0;
+              // 3.6：門檻還沒讀回（NaN）時，(int) 轉型是未定義行為；改輸出 -1，網頁遇 -1 不顯示門檻比較
+              auto thr = [](number::Number *e) { float v = e->state; return std::isnan(v) ? -1 : (int) v; };
+              float me = id(radar_move_energy).state;
+              if (m_ok && !std::isnan(me)) { int g = std::min(8, (int) (md / res)); n += snprintf(rs + n, sizeof(rs) - n, "m,%d,%d,%d;", g, (int) me, thr(mt[g])); }
+              if (s_ok && !std::isnan(se)) { int g = std::min(8, (int) (sd / res)); n += snprintf(rs + n, sizeof(rs) - n, "s,%d,%d,%d;", g, (int) se, thr(st[g])); }
+              snprintf(rs + n, sizeof(rs) - n, "p,%d;r,%d;h,%d;b,%d", id(motion).state ? 1 : 0, id(residue) ? 1 : 0, (!id(presence_raw).state && id(presence).state) ? 1 : 0, id(bridging) ? 1 : 0);
+            }
+            if (!id(pres_reason).has_state() || strcmp(id(pres_reason).state.c_str(), rs) != 0) id(pres_reason).publish_state(rs);
+          }
+          // ---- 逾時 ----
+          if (!id(radar_timeout_hw).has_state()) return;
+          float hw = id(radar_timeout_hw).state;
+          // 第一次開機（3.1 剛燒）：範本數字取雷達現值，之後以範本為準
+          if (!id(tmo_synced)) {
+            float v = (id(smart_active) && id(smart_base) > 0.5f) ? id(smart_base) : hw;
+            auto c0 = id(radar_timeout).make_call(); c0.set_value(v); c0.perform();
+            id(tmo_synced) = true;
+            return;
+          }
+          float base = id(radar_timeout).state;
+          if (std::isnan(base)) return;
+          // 3.3：逾時預設選單跟著目前的逾時值
+          {
+            const char *pn = fabsf(base - 60) < 0.5f ? "Work 60 s" : fabsf(base - 120) < 0.5f ? "Sleep 120 s" : fabsf(base - 5) < 0.5f ? "Away 5 s" : "Custom";
+            if (id(timeout_preset).current_option() != pn) id(timeout_preset).publish_state(pn);
+          }
+          auto set_mode = [&](const char *m) { if (!id(smart_mode_ts).has_state() || id(smart_mode_ts).state != m) id(smart_mode_ts).publish_state(m); };
+          auto write_hw = [&](float v) {
+            id(smart_wrote) = true;
+            id(smart_eng) = id(ld2410_engineering).state;
+            id(radar_settle).execute();
+            auto call = id(radar_timeout_hw).make_call();
+            call.set_value(v);
+            call.perform();
+          };
+          if (!id(smart_delay).state) {
+            id(smart_mode) = 0; id(residue) = false; id(residue_s) = 0;
+            set_mode("off");
+            if (id(presence_hold).state != base) id(presence_hold).publish_state(base);
+            if (id(smart_active)) { id(smart_active) = false; write_hw(base); }
+            else if (fabsf(hw - base) > 0.5f && now - id(smart_last_ms) > (uint32_t) (id(smart_write_gap_s).state * 1000.0f)) { id(smart_last_ms) = now; write_hw(base); }
+            return;
+          }
+          if (!id(smart_active) || fabsf(hw - 1.0f) > 0.5f) {
+            if (id(smart_last_ms) != 0 && now - id(smart_last_ms) < (uint32_t) (id(smart_write_gap_s).state * 1000.0f)) return;
+            id(smart_active) = true; id(smart_last_ms) = now;
+            write_hw(1.0f);
+          }
+          // 每個狀態的逾時：Leaving＝縮短、Still＝延長、Entering＝基本；Moving 沿用上一個（短暫起身不取消延長）
+          int want = id(smart_mode);
+          if (stt == 0 || stt == 1) want = 0;
+          else if (stt == 4) want = 2;
+          else if (stt == 3) want = 1;
+          // 4.3：Moving 沿用上一個「延長」（短暫起身不取消），但不沿用「縮短」：遠處讀到 2 秒就把保持縮成 2 秒，
+          // 人又動了、近處有目標，卻要等近處靜止滿 10 秒才恢復
+          else if (stt == 2 && want == 2) want = 0;
+          id(smart_mode) = want;
+          set_mode(want == 1 ? "extended" : want == 2 ? "shortened" : "normal");
+          float target = base;
+          if (want == 1) target = base + id(delay_extend).state;
+          else if (want == 2) target = std::max(0.0f, base - id(delay_shorten).state);
+          // 雷達底層自己還有 1 秒，所以 ESP32 這邊少算 1 秒
+          id(hold_ms) = (uint32_t) (std::max(0.0f, target - 1.0f) * 1000.0f);
+          if (id(presence_hold).state != target) id(presence_hold).publish_state(target);
+      - if:
+          condition:
+            lambda: 'return id(smart_wrote) && id(smart_eng);'
+          then:
+            - script.execute: smart_eng_reopen
+  # 2.9: separate script so the 1 s tick is not blocked (mode single) during the 4 s wait
+  - id: smart_eng_reopen
+    mode: restart
+    then:
+      - delay: 4s
+      - if:
+          condition:
+            switch.is_off: ld2410_engineering
+          then:
+            - lambda: 'id(eng_reopen) = true;'
+            - switch.turn_on: ld2410_engineering
+  # 工程模式保險：開啟後 N 分鐘自動關（校準進行中等校準結束；每次重新開啟重新計時）
+  - id: eng_auto_off
+    mode: restart
+    then:
+      - lambda: |-
+          auto tm = id(sntp_time).now();
+          if (tm.is_valid()) id(eng_off_at).publish_state(ESPTime::from_epoch_utc(tm.timestamp + (int) (id(eng_auto_off_min).state * 60)).strftime("%Y-%m-%dT%H:%M:%SZ"));
+      - delay: !lambda 'return (uint32_t) (id(eng_auto_off_min).state * 60000);'
+      - while:
+          condition:
+            lambda: 'return id(cal_running);'
+          then:
+            - delay: 5s
+      - if:
+          condition:
+            switch.is_on: ld2410_engineering
+          then:
+            - switch.turn_off: ld2410_engineering
+  # 3.3 還原設定。最佳值：參數回建議值，18 個門檻、溫濕度補償、藍牙、歷史資料不動。
+  # 出廠：雷達模組恢復出廠（門檻、最遠格、逾時、藍牙回原廠）、參數回韌體初始值（智慧延時關）、清除校準結果與歷史學習資料。
+  - id: restore_settings
+    mode: single
+    parameters:
+      factory: bool
+    then:
+      - if:
+          condition:
+            lambda: 'return id(cal_running);'
+          then:
+            - lambda: 'id(restore_status_ts).publish_state("busy");'
+            - script.stop: restore_settings
+      - lambda: |-
+          id(restore_status_ts).publish_state(factory ? "running_factory" : "running_recommended");
+          auto n = [](number::Number *e, float v) { auto c = e->make_call(); c.set_value(v); c.perform(); };
+          n(id(radar_timeout), 5);
+          n(id(delay_near), 3); n(id(delay_extend), 10); n(id(delay_shorten), 2);
+          n(id(delay_still_s), 10); n(id(delay_away_s), 2); n(id(hyst_margin), 5); n(id(spike_window), 30);
+          for (auto &d : std::vector<std::pair<number::Number *, float>>{
+              {id(floor_wait_s), 60}, {id(floor_window), 180}, {id(floor_every_min), 30}, {id(occ_every_min), 60}, {id(pir_recent_s), 300},
+              {id(hist_start_s), 180}, {id(hist_quiet_s), 600}, {id(hist_apply_days), 7}, {id(hist_clamp_step), 10}, {id(hist_min_q), 20000},
+              {id(hist_min_occ), 300}, {id(hist_pct_empty), 99.9f}, {id(hist_pct_occ), 10}, {id(seat_gap), 2}, {id(cal_abort_wait_s), 5},
+              {id(cal_abort_energy), 90}, {id(cal_abort_s), 1}, {id(cal_sit_wait_s), 90}, {id(cal_sit_confirm_s), 3}, {id(cal_verify_s), 3},
+              {id(residue_window), 10}, {id(pir_hold_s), 5}, {id(smart_write_gap_s), 30}, {id(settle_s), 12}, {id(pir_mismatch_s), 3}})
+            n(d.first, d.second);
+          n(id(cal_spread_limit), 20); n(id(intf_ratio), 2.5); n(id(intf_gap), 10);
+          n(id(residue_drop), 0); n(id(residue_max_e), 35); n(id(residue_rebound), 5); n(id(residue_confirm_s), 4); n(id(residue_max_s), 60); n(id(entering_s), 10); n(id(zone_hold_s), 4); n(id(state_smooth_s), 3); n(id(cal_abort_spread), 40); n(id(entry_confirm_s), 2); n(id(bridge_e), 60); n(id(bridge_s), 60); n(id(led_brightness), 30); n(id(lost_hold_s), 180); n(id(energy_pres), 30); n(id(exit_near), 0); n(id(exit_far), 0); n(id(exit_win_s), 0); n(id(exit_e), 15);
+          n(id(zone1_start), 0); n(id(zone1_end), 3); n(id(zone2_start), 4); n(id(zone2_end), 8);
+          n(id(cal_delay), 15); n(id(cal_duration), 120); n(id(cal_sit_duration), 30); n(id(cal_margin), 10);
+          n(id(eng_auto_off_min), 10); n(id(radar_link_timeout), 5); id(cal_two).turn_off();
+          n(id(buzzer_volume), 80);
+          auto m = id(buzzer_melody).make_call(); m.set_value("motion:d=32,o=6,b=200:e,16p,g"); m.perform();
+          if (factory) id(smart_delay).turn_off(); else id(smart_delay).turn_on();
+          id(hist_learn).turn_on(); id(hist_auto).turn_off(); id(cal_block_unstable).turn_on();
+          id(sounds).turn_off(); id(hourly_chime).turn_off(); id(led_follow).turn_off(); id(led_status).turn_off();
+      - light.turn_off: ws2812
+      - if:
+          condition:
+            lambda: 'return factory;'
+          then:
+            - button.press: hist_reset_btn
+            - lambda: |-
+                id(cal_status).publish_state("");
+                id(cal_phase_ts).publish_state("idle");
+                id(cal_fail_ts).publish_state("none");
+                id(cr_samples).publish_state(NAN);
+                id(cr_seat_gates).publish_state(NAN);
+                id(cal_finished_at).publish_state("");
+                id(calibration_done).turn_off();
+                id(cal_bak_ok) = false; id(cal_bak_at) = 0;
+                id(cal_backup_text).publish_state("");
+                id(cal_backup_at_ts).publish_state("");
+            - button.press: radar_factory_reset_btn
+            - script.execute: radar_settle
+            - delay: 5s
+            - button.press: radar_query_btn
+          else:
+            - number.set:
+                id: radar_max_move
+                value: 8
+            - delay: 1s
+            - number.set:
+                id: radar_max_still
+                value: 8
+            - script.execute: radar_settle
+      - delay: 3s
+      - lambda: 'id(restore_status_ts).publish_state(factory ? "done_factory" : "done_recommended");'
+  # 記錄一次有人／無人轉換（最近 20 筆）
+  - id: log_trigger
+    mode: queued
+    max_runs: 4
+    parameters:
+      present: bool
+    then:
+      - lambda: |-
+          auto now = id(sntp_time).now();
+          std::string ts = now.is_valid() ? now.strftime("%m-%d %H:%M:%S") : std::string("--");
+          float d = id(radar_detect_dist).state, me = id(radar_move_energy).state, se = id(radar_still_energy).state;
+          char line[64];
+          snprintf(line, sizeof(line), "%s,%d,%d,%d,%d\n", ts.c_str(), present ? 1 : 0,
+                   std::isnan(d) ? -1 : (int) d, std::isnan(me) ? -1 : (int) me, std::isnan(se) ? -1 : (int) se);
+          std::string buf = std::string(line) + id(trigger_log_buf);
+          int n = 0;
+          size_t pos = 0;
+          while ((pos = buf.find('\n', pos)) != std::string::npos) {
+            if (++n >= 20) { buf.resize(pos + 1); break; }
+            pos++;
+          }
+          id(trigger_log_buf) = buf;
+          id(trigger_log_text).publish_state(buf);
+  # 3.0: writes cal_thr[0..17] to the radar (shared by auto_calibrate, hist_apply, hist_undo)
+  # 3.2: one command per gate. The ld2410 gate command always carries both move and still values (set_gate_threshold reads
+  # both numbers), so the move number is only published and the still number's set sends both: 9 commands instead of 18.
+  # Verified in ld2410.cpp: set_gate_threshold enters/leaves config mode only, it does not restart the radar.
+  - id: write_thr
+    mode: single
+    then:
+      - lambda: 'id(g0_move_threshold)->publish_state(id(cal_thr)[0]);'
+      - number.set:
+          id: g0_still_threshold
+          value: !lambda 'return id(cal_thr)[1];'
+      - delay: 300ms
+      - lambda: 'id(g1_move_threshold)->publish_state(id(cal_thr)[2]);'
+      - number.set:
+          id: g1_still_threshold
+          value: !lambda 'return id(cal_thr)[3];'
+      - delay: 300ms
+      - lambda: 'id(g2_move_threshold)->publish_state(id(cal_thr)[4]);'
+      - number.set:
+          id: g2_still_threshold
+          value: !lambda 'return id(cal_thr)[5];'
+      - delay: 300ms
+      - lambda: 'id(g3_move_threshold)->publish_state(id(cal_thr)[6]);'
+      - number.set:
+          id: g3_still_threshold
+          value: !lambda 'return id(cal_thr)[7];'
+      - delay: 300ms
+      - lambda: 'id(g4_move_threshold)->publish_state(id(cal_thr)[8]);'
+      - number.set:
+          id: g4_still_threshold
+          value: !lambda 'return id(cal_thr)[9];'
+      - delay: 300ms
+      - lambda: 'id(g5_move_threshold)->publish_state(id(cal_thr)[10]);'
+      - number.set:
+          id: g5_still_threshold
+          value: !lambda 'return id(cal_thr)[11];'
+      - delay: 300ms
+      - lambda: 'id(g6_move_threshold)->publish_state(id(cal_thr)[12]);'
+      - number.set:
+          id: g6_still_threshold
+          value: !lambda 'return id(cal_thr)[13];'
+      - delay: 300ms
+      - lambda: 'id(g7_move_threshold)->publish_state(id(cal_thr)[14]);'
+      - number.set:
+          id: g7_still_threshold
+          value: !lambda 'return id(cal_thr)[15];'
+      - delay: 300ms
+      - lambda: 'id(g8_move_threshold)->publish_state(id(cal_thr)[16]);'
+      - number.set:
+          id: g8_still_threshold
+          value: !lambda 'return id(cal_thr)[17];'
+      - delay: 300ms
+  - id: hist_compute
+    mode: single
+    then:
+      - lambda: |-
+          auto tot = [](const uint16_t *h) -> uint32_t { uint32_t t = 0; for (int i = 0; i < 101; i++) t += h[i]; return t; };
+          auto pct = [](const uint16_t *h, uint32_t t, float q) -> int {
+            uint32_t need = (uint32_t) ceilf(q * t), c = 0;
+            for (int i = 0; i < 101; i++) { c += h[i]; if (c >= need) return i; }
+            return 100;
+          };
+          number::Number *th[18] = {${gates_thr_all_18}};
+          float m = id(cal_margin).state;
+          uint32_t minq = UINT32_MAX, occ = 0;
+          int changes = 0;
+          std::string sug;
+          char b[8];
+          for (int k = 0; k < 18; k++) {
+            const uint16_t *q = &id(hq)[k * 101], *o = &id(ho)[k * 101];
+            uint32_t nq = tot(q), no = tot(o);
+            minq = std::min(minq, nq);
+            occ += no;
+            float cur = th[k]->state, t = cur;
+            if (nq >= (uint32_t) id(hist_min_q).state) {
+              int n = pct(q, nq, id(hist_pct_empty).state / 100.0f);
+              t = std::min(100.0f, n + m);
+              if ((k & 1) && no >= (uint32_t) id(hist_min_occ).state) {
+                int p = pct(o, no, id(hist_pct_occ).state / 100.0f);
+                if (p >= n + id(seat_gap).state && t >= p) t = std::max((float) n + 1, std::min(ceilf((n + p) / 2.0f), (float) p - 1));
+              }
+            }
+            id(hist_thr)[k] = t;
+            if (!std::isnan(cur) && !std::isnan(t) && fabsf(t - cur) >= 2) changes++;
+            snprintf(b, sizeof(b), "%s%d", k ? "," : "", std::isnan(t) ? -1 : (int) t);
+            sug += b;
+          }
+          if (id(thr_bak_ok) && !id(hist_bak_text).has_state()) {
+            std::string bk;
+            for (int k = 0; k < 18; k++) { snprintf(b, sizeof(b), "%s%d", k ? "," : "", (int) id(thr_bak)[k]); bk += b; }
+            id(hist_bak_text).publish_state(bk);
+          }
+          id(hist_ready) = minq >= (uint32_t) id(hist_min_q).state;
+          id(hist_changes) = id(hist_ready) ? changes : 0;
+          id(hist_q_hours).publish_state(minq / 3600.0f);
+          id(hist_o_n).publish_state(occ);
+          id(hist_changes_s).publish_state(id(hist_changes));
+          {
+            // 干擾格：第 2～8 格的空房中位數，和「這 7 格中位數的中位數」比
+            std::string ig;
+            if (id(hist_ready)) {
+              for (int t = 0; t < 2; t++) {  // t=0 移動、t=1 靜止
+                // 3.8：只比偵測格數內的格（移動用 Radar Max Move Gate、靜止用 Radar Max Still Gate）；超出的格不判、也不拉高比較基準
+                float mgx = t ? id(radar_max_still).state : id(radar_max_move).state;
+                int gmax = std::isnan(mgx) ? 8 : std::max(2, std::min(8, (int) mgx));
+                int ng = gmax - 1;  // 第 2..gmax 格共 ng 格
+                if (ng < 3) continue;
+                float med[7];
+                for (int g = 2; g <= gmax; g++) { const uint16_t *q = &id(hq)[(2 * g + t) * 101]; med[g - 2] = pct(q, tot(q), 0.5f); }
+                float srt[7]; memcpy(srt, med, sizeof(float) * ng); std::sort(srt, srt + ng);
+                float mom = srt[ng / 2];
+                for (int g = 2; g <= gmax; g++)
+                  if (med[g - 2] >= id(intf_ratio).state * mom && med[g - 2] >= mom + id(intf_gap).state) {
+                    char b2[24]; snprintf(b2, sizeof(b2), "%sG%d %s", ig.empty() ? "" : ", ", g, t ? "still" : "move"); ig += b2;
+                  }
+              }
+              if (ig.empty()) ig = "none";
+            } else ig = "collecting";
+            if (!id(intf_gates_ts).has_state() || id(intf_gates_ts).state != ig) id(intf_gates_ts).publish_state(ig);
+          }
+          id(hist_sug_text).publish_state(id(hist_ready) ? sug : std::string(""));
+          // keep the last action ("Applied", "Applied automatically", "Undone") visible; everything else is a transient state
+          const std::string &st = id(hist_status).state;
+          if (!id(hist_status).has_state() || (st.rfind("Applied", 0) != 0 && st != "Undone" && st != "Applying" && st != "Undoing"))
+            id(hist_status).publish_state(id(hist_ready) ? "Ready" : "Collecting");
+  - id: hist_apply
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: |-
+              number::Number *th[18] = {${gates_thr_all_18}};
+              for (int k = 0; k < 18; k++) if (std::isnan(th[k]->state) || std::isnan(id(hist_thr)[k])) return true;
+              return !id(hist_ready) || id(cal_running) || id(write_thr).is_running();
+          then:
+            - lambda: 'id(hist_status).publish_state(id(hist_ready) ? "Busy, try later" : "Not enough data");'
+            - delay: 10s
+            - script.execute: hist_compute
+            - script.stop: hist_apply
+      - lambda: |-
+          number::Number *th[18] = {${gates_thr_all_18}};
+          std::string bk;
+          char b[8];
+          for (int k = 0; k < 18; k++) {
+            float cur = th[k]->state, t = id(hist_thr)[k];
+            if (id(hist_clamp)) t = std::max(cur - id(hist_clamp_step).state, std::min(cur + id(hist_clamp_step).state, t));
+            id(thr_bak)[k] = cur;
+            id(cal_thr)[k] = t;
+            snprintf(b, sizeof(b), "%s%d", k ? "," : "", (int) cur);
+            bk += b;
+          }
+          id(thr_bak_ok) = true;
+          id(hist_bak_text).publish_state(bk);
+          id(cal_running) = true;
+          id(hist_status).publish_state("Applying");
+          ESP_LOGI("hist", "apply (%s): %d thresholds differ by >= 2", id(hist_clamp) ? "auto" : "manual", id(hist_changes));
+      - script.execute: write_thr
+      - script.wait: write_thr
+      - lambda: |-
+          id(cal_running) = false;
+          auto t = id(sntp_time).now();
+          if (t.is_valid()) id(hist_last_apply) = (uint32_t) t.timestamp;
+          id(hist_status).publish_state(id(hist_clamp) ? "Applied automatically" : "Applied");
+      - delay: 2s
+      - script.execute: hist_compute
+  # 3.8 還原校準：把 Calibration Backup 的 18 個門檻寫回；備份保留，可重複還原
+  - id: cal_restore
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: 'return !id(cal_bak_ok) || id(cal_running) || id(write_thr).is_running();'
+          then:
+            - script.stop: cal_restore
+      - lambda: |-
+          for (int k = 0; k < 18; k++) id(cal_thr)[k] = id(cal_bak)[k];
+          id(cal_running) = true;
+          id(cal_status).publish_state("Restoring thresholds");
+      - script.execute: write_thr
+      - script.wait: write_thr
+      - lambda: |-
+          id(cal_running) = false;
+          id(cal_status).publish_state("Restored");
+  - id: hist_undo
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: 'return !id(thr_bak_ok) || id(cal_running) || id(write_thr).is_running();'
+          then:
+            - lambda: 'id(hist_status).publish_state(id(thr_bak_ok) ? "Busy, try later" : "No backup");'
+            - delay: 10s
+            - script.execute: hist_compute
+            - script.stop: hist_undo
+      - lambda: |-
+          for (int k = 0; k < 18; k++) id(cal_thr)[k] = id(thr_bak)[k];
+          id(cal_running) = true;
+          id(hist_status).publish_state("Undoing");
+      - script.execute: write_thr
+      - script.wait: write_thr
+      - lambda: |-
+          id(cal_running) = false;
+          id(thr_bak_ok) = false;
+          id(hist_bak_text).publish_state("");
+          id(hist_status).publish_state("Undone");
+      - delay: 2s
+      - script.execute: hist_compute
+  - id: auto_calibrate
+    mode: single
+    then:
+      # 4.3.1：雷達參數（最大格數）還沒讀回就不能校準：備份會存成全 0、品質判定也不準。先自動重讀一次，仍沒讀回才中止
+      - if:
+          condition:
+            lambda: 'return !(id(radar_max_move).state >= 2 && id(radar_max_still).state >= 2);'
+          then:
+            - button.press: radar_query_btn
+            - delay: 6s
+            - if:
+                condition:
+                  lambda: 'return !(id(radar_max_move).state >= 2 && id(radar_max_still).state >= 2);'
+                then:
+                  - lambda: 'id(cal_status).publish_state("Failed: radar parameters not read, press Radar Query Params and retry");'
+                  - script.stop: auto_calibrate
+      - lambda: 'id(cal_running) = true;'
+      - if:
+          condition:
+            switch.is_on: led_status
+          then:
+            - light.turn_on:
+                id: ws2812
+                brightness: !lambda 'return id(led_brightness).state / 100.0f;'
+                red: 0%
+                green: 0%
+                blue: 100%
+                effect: "Breath"
+      - lambda: |-
+          id(cal_status).publish_state("Leave the room, starting soon");
+          for (int i = 0; i < 18; i++) { id(cal_max)[i] = 0; id(cal_sum)[i] = 0; }
+          id(cal_samples) = 0;
+      - delay: !lambda 'return (uint32_t) (id(cal_delay).state * 1000);'
+      - switch.turn_on: ld2410_engineering
+      - lambda: |-
+          id(cal_status).publish_state("Sampling, keep the room empty");
+          id(cal_end_ms) = millis() + (uint32_t) (id(cal_duration).state * 1000);
+          id(cal_sample_ms) = millis(); id(cal_abort_n) = 0; id(cal_aborted) = false;
+      - delay: 3s
+      - while:
+          condition:
+            lambda: 'return (int32_t) (id(cal_end_ms) - millis()) > 0;'
+          then:
+            - lambda: |-
+                sensor::Sensor *e[18] = {${gates_energy_all_18}};
+                bool got = false;
+                for (int i = 0; i < 18; i++) {
+                  float v = e[i]->state;
+                  if (std::isnan(v)) continue;
+                  got = true;
+                  if (v > id(cal_max)[i]) id(cal_max)[i] = v;
+                  id(cal_sum)[i] += v;
+                }
+                if (got) id(cal_samples)++;
+                // 3.2：取樣開始 5 秒後（PIR 有 5 秒延遲關），PIR 觸發或任一格移動能量 ≥90 連續 1 秒 → 房間有人，中止
+                if (millis() - id(cal_sample_ms) > (uint32_t) (id(cal_abort_wait_s).state * 1000.0f)) {
+                  float mx = 0;
+                  for (int i = 0; i < 18; i += 2) if (!std::isnan(e[i]->state)) mx = std::max(mx, e[i]->state);
+                  id(cal_abort_n) = mx >= id(cal_abort_energy).state ? id(cal_abort_n) + 1 : 0;
+                  if (id(motion).state || id(cal_abort_n) >= (int) (id(cal_abort_s).state * 5)) {
+                    ESP_LOGW("cal", "empty-room sampling aborted: PIR %d, max move energy %.0f", id(motion).state ? 1 : 0, mx);
+                    id(cal_aborted) = true;
+                    id(cal_end_ms) = millis();
+                  }
+                }
+            - delay: 200ms
+      - if:
+          condition:
+            lambda: 'return id(cal_aborted);'
+          then:
+            - switch.turn_off: ld2410_engineering
+            - lambda: |-
+                id(cal_status).publish_state("Aborted: someone in the room, thresholds unchanged");
+                id(cal_running) = false;
+            - if:
+                condition:
+                  switch.is_on: led_status
+                then:
+                  - light.turn_off: ws2812
+                  - script.execute: led_sync
+            - if:
+                condition:
+                  switch.is_on: sounds
+                then:
+                  - rtttl.play: "abort:d=8,o=5,b=140:e,p,c"
+            - script.stop: auto_calibrate
+      - if:
+          condition:
+            lambda: 'return id(cal_samples) == 0;'
+          then:
+            - switch.turn_off: ld2410_engineering
+            - lambda: |-
+                id(cal_status).publish_state("Failed: no energy data, thresholds unchanged");
+                id(cal_running) = false;
+            - if:
+                condition:
+                  switch.is_on: led_status
+                then:
+                  - light.turn_off: ws2812
+                  - script.execute: led_sync
+            - script.stop: auto_calibrate
+      - lambda: |-
+          // 底噪統計（網頁「校準與備份」用）：18 個值，順序＝第0格移動、第0格靜止、第1格移動…
+          std::string mx, av;
+          char t[16];
+          for (int i = 0; i < 18; i++) {
+            snprintf(t, sizeof(t), "%s%d", i ? "," : "", (int) id(cal_max)[i]);
+            mx += t;
+            snprintf(t, sizeof(t), "%s%.1f", i ? "," : "", id(cal_sum)[i] / id(cal_samples));
+            av += t;
+          }
+          id(noise_max_text).publish_state(mx);
+          id(noise_avg_text).publish_state(av);
+          {
+            int bad = 0; float worst = 0;
+            // 3.8：只算偵測格數內的格（移動用 Radar Max Move Gate、靜止用 Radar Max Still Gate），超出的格不影響品質判定
+            float mg = id(radar_max_move).state, sg = id(radar_max_still).state;
+            // 4.3.1：最大格數是 0（還沒讀回）時，下面的迴圈會把每一格都跳過、bad 永遠是 0 而誤報 stable → 改報「參數未讀回」
+            bool unread = (!std::isnan(mg) && mg < 1) || (!std::isnan(sg) && sg < 1);
+            int mgi = std::isnan(mg) ? 8 : (int) mg, sgi = std::isnan(sg) ? 8 : (int) sg;
+            // 4.3.1：底噪飽和：偵測格內平均能量 ≥ 90 的格數；門檻會被卡在上限 100，雷達等於失明或永遠判有人
+            int sat = 0;
+            if (!unread && id(cal_samples) > 0)
+              for (int i = 4; i < 18; i++) {
+                if ((i >> 1) > ((i & 1) ? sgi : mgi)) continue;
+                float sp = id(cal_max)[i] - id(cal_sum)[i] / id(cal_samples);
+                worst = std::max(worst, sp);
+                if (sp >= id(cal_spread_limit).state) bad++;
+                if (id(cal_sum)[i] / id(cal_samples) >= 90.0f) sat++;
+              }
+            char q[112];
+            if (unread) snprintf(q, sizeof(q), "unknown: radar parameters not read, press Radar Query Params and calibrate again");
+            else if (sat >= 2) snprintf(q, sizeof(q), "saturated: %d gates average >= 90, check power, position or the radar module", sat);
+            else if (bad == 0) snprintf(q, sizeof(q), "stable (max spread %.0f)", worst);
+            else snprintf(q, sizeof(q), "unstable: %d values vary by >= %.0f (max spread %.0f), try again with AC/fans off", bad, id(cal_spread_limit).state, worst);
+            id(cal_quality_ts).publish_state(q);
+            id(cal_unstable) = bad > 0 || unread || sat >= 2;
+            id(cal_hard_unstable) = worst >= id(cal_abort_spread).state;
+          }
+      # 3.8 兩段式：最大波動 ≥ Calibration Abort Spread（且「Calibration Block Unstable」開著）→ 不寫入門檻、中止；
+      # 只超過 Calibration Spread Limit → 照寫，狀態與階段標警告（done_warning）
+      - if:
+          condition:
+            lambda: 'return id(cal_hard_unstable) && id(cal_block_unstable).state;'
+          then:
+            - switch.turn_off: ld2410_engineering
+            - lambda: |-
+                id(cal_status).publish_state("Aborted: unstable sampling, thresholds unchanged");
+                id(cal_running) = false;
+            - if:
+                condition:
+                  switch.is_on: led_status
+                then:
+                  - light.turn_off: ws2812
+                  - script.execute: led_sync
+            - if:
+                condition:
+                  switch.is_on: sounds
+                then:
+                  - rtttl.play: "abort:d=8,o=5,b=140:e,p,c"
+            - script.stop: auto_calibrate
+      # 2.9 雙點校準第二點：請回到平常待的位置坐著不動；前 10 秒不取樣（走回座位），之後取 Sit Duration 秒的各格靜止能量平均
+      - lambda: |-
+          id(cal_sit_n) = 0; id(cal_skip_sit) = false;
+          for (int g = 0; g < 9; g++) id(cal_sit_sum)[g] = 0;
+      - if:
+          condition:
+            switch.is_on: cal_two
+          then:
+            - lambda: |-
+                id(cal_status).publish_state("Sit still at your usual spot");
+                id(cal_sit_ok) = 0;
+                id(cal_end_ms) = millis() + (uint32_t) (id(cal_sit_wait_s).state * 1000.0f);
+            - if:
+                condition:
+                  switch.is_on: sounds
+                then:
+                  - rtttl.play: "sit:d=8,o=5,b=160:g,p,g,p,g"
+            # 3.1：等人真的坐回近處（有人＋靜止目標在近處範圍內，連續 3 秒）才開始取樣，最多等 90 秒
+            - while:
+                condition:
+                  lambda: 'return id(cal_sit_ok) < (int) (id(cal_sit_confirm_s).state * 5) && (int32_t) (id(cal_end_ms) - millis()) > 0;'
+                then:
+                  - lambda: |-
+                      float res = ${radar_res_m};
+                      float sd = id(radar_still_dist).state;
+                      bool near = id(presence_raw).state && id(radar_still).state && !std::isnan(sd) && (int) (sd / res) <= (int) id(delay_near).state;
+                      id(cal_sit_ok) = near ? id(cal_sit_ok) + 1 : 0;
+                  - delay: 200ms
+            - if:
+                condition:
+                  lambda: 'return id(cal_sit_ok) >= (int) (id(cal_sit_confirm_s).state * 5);'
+                then:
+                  - lambda: |-
+                      id(cal_status).publish_state("Seated, sampling");
+                      id(cal_end_ms) = millis() + (uint32_t) (id(cal_sit_duration).state * 1000);
+                else:
+                  - lambda: |-
+                      id(cal_skip_sit) = true;
+                      id(cal_end_ms) = millis();
+            - while:
+                condition:
+                  lambda: 'return (int32_t) (id(cal_end_ms) - millis()) > 0;'
+                then:
+                  - lambda: |-
+                      sensor::Sensor *s[9] = {${gates_energy_still_9}};
+                      bool ok = true;
+                      for (int g = 0; g < 9; g++) if (std::isnan(s[g]->state)) ok = false;
+                      if (ok) {
+                        for (int g = 0; g < 9; g++) id(cal_sit_sum)[g] += s[g]->state;
+                        id(cal_sit_n)++;
+                      }
+                  - delay: 200ms
+      # 門檻＝底噪最大值＋餘裕（上限 100）。雙點：某格坐著的平均靜止能量 p 比底噪最大值 n 高至少 2，但門檻 ≥ p（會漏掉人），
+      # 就把該格靜止門檻改成 n 與 p 的中點（至少 n+1、至多 p-1）。移動門檻不受第二點影響。
+      - lambda: |-
+          float m = id(cal_margin).state;
+          int adj = 0, sig = 0;
+          // 3.1：歷史學習資料足夠（每格空房 ≥20000 筆）時，底噪改用歷史分布的 99.9 百分位；不足就用這次取樣的最大值
+          float nf[18];
+          id(cal_used_hist) = id(hist_ready);
+          for (int k = 0; k < 18; k++) {
+            nf[k] = id(cal_max)[k];
+            if (!id(hist_ready)) continue;
+            const uint16_t *q = &id(hq)[k * 101];
+            uint32_t t = 0, c = 0; for (int i = 0; i < 101; i++) t += q[i];
+            uint32_t need = (uint32_t) ceilf((id(hist_pct_empty).state / 100.0f) * t); int n = 100;
+            for (int i = 0; i < 101; i++) { c += q[i]; if (c >= need) { n = i; break; } }
+            nf[k] = n;
+          }
+          for (int g = 0; g < 9; g++) {
+            id(cal_thr)[2 * g] = std::min(100.0f, nf[2 * g] + m);
+            float st = std::min(100.0f, nf[2 * g + 1] + m);
+            if (id(cal_sit_n) > 0) {
+              float n = nf[2 * g + 1], p = id(cal_sit_sum)[g] / id(cal_sit_n);
+              if (p >= n + id(seat_gap).state) sig++;
+              if (p >= n + id(seat_gap).state && st >= p) {
+                float t = std::max(n + 1, std::min(ceilf((n + p) / 2), p - 1));
+                ESP_LOGI("cal", "two-point gate %d still: noise max %.0f, seated avg %.1f, threshold %.0f -> %.0f", g, n, p, st, t);
+                st = t; adj++;
+              }
+            }
+            id(cal_thr)[2 * g + 1] = st;
+          }
+          if (id(cal_two).state) ESP_LOGI("cal", "two-point: %d seated samples, %d gates see the person, %d still thresholds lowered", id(cal_sit_n), sig, adj);
+          id(cal_seat_sig) = sig; id(cal_lowered) = adj; id(cal_verify) = -1;
+          // 3.8：寫入前備份目前 18 個門檻到 Calibration Backup（和歷史套用的備份分開；Restore Calibration 還原）；門檻還沒讀回（NaN）就不備份
+          {
+            number::Number *th[18] = {${gates_thr_all_18}};
+            bool all = true, any_nonzero = false;
+            for (int k = 0; k < 18; k++) { if (std::isnan(th[k]->state)) all = false; else if (th[k]->state > 0) any_nonzero = true; }
+            // 4.3.1：18 個門檻全是 0 代表還沒讀回（開機後可能停在 0），不備份，否則 Restore Calibration 會把全 0 寫回雷達
+            if (all && any_nonzero) {
+              std::string bk; char b[8];
+              for (int k = 0; k < 18; k++) { id(cal_bak)[k] = th[k]->state; snprintf(b, sizeof(b), "%s%d", k ? "," : "", (int) th[k]->state); bk += b; }
+              id(cal_bak_ok) = true;
+              id(cal_backup_text).publish_state(bk);
+              auto tb = id(sntp_time).now();
+              if (tb.is_valid()) { id(cal_bak_at) = (uint32_t) tb.timestamp; id(cal_backup_at_ts).publish_state(ESPTime::from_epoch_utc(tb.timestamp).strftime("%Y-%m-%dT%H:%M:%SZ")); }
+            }
+          }
+          id(cal_status).publish_state("Writing thresholds");
+      - script.execute: write_thr
+      - script.wait: write_thr
+      - switch.turn_off: ld2410_engineering
+      # 3.2 第二點驗證：寫完新門檻 3 秒後，人還坐著時雷達是否仍判定有人
+      - if:
+          condition:
+            lambda: 'return id(cal_sit_n) > 0;'
+          then:
+            - lambda: 'id(cal_status).publish_state("Verifying");'
+            - delay: !lambda 'return (uint32_t) (id(cal_verify_s).state * 1000.0f);'
+            - lambda: 'id(cal_verify) = id(presence_raw).state ? 1 : 0;'
+      - lambda: 'id(cal_running) = false;'
+      - if:
+          condition:
+            switch.is_on: led_status
+          then:
+            - light.turn_off: ws2812
+            - script.execute: led_sync
+      - lambda: |-
+          char buf[192], seat[48] = "";
+          if (id(cal_sit_n) > 0)
+            snprintf(seat, sizeof(seat), ", seated %d gates, lowered %d, %s", id(cal_seat_sig), id(cal_lowered), id(cal_verify) == 1 ? "seen" : "not seen");
+          snprintf(buf, sizeof(buf), "Done, %d samples%s%s%s%s", (int) id(cal_samples), id(cal_used_hist) ? ", history used" : "", id(cal_skip_sit) ? ", seated step skipped" : "", seat, id(cal_unstable) ? ", warning: unstable sampling" : "");
+          id(cal_status).publish_state(buf);
+      - if:
+          condition:
+            switch.is_on: sounds
+          then:
+            - rtttl.play: "done:d=16,o=6,b=200:c,e,g"
+
+light:
+  - platform: esp32_rmt_led_strip
+    chipset: ws2812
+    channel_colors: GRB
+    pin: GPIO8
+    num_leds: 6
+    name: "LED All"
+    id: ws2812
+    restore_mode: ALWAYS_OFF
+    effects:
+      - addressable_lambda:
+          name: "Breath"
+          update_interval: 15ms
+          lambda: |-
+            static float phase = 0.0f;
+            if (initial_run) {
+              phase = 0.0f;
+            }
+            float level = (sin(phase) + 1.0f) / 2.0f;
+            uint8_t scale = 20 + level * 235;
+            for (int i = 0; i < it.size(); i++) {
+              it[i] = current_color * scale;
+            }
+            phase += 0.05f;
+            if (phase >= 2.0f * M_PI) {
+              phase -= 2.0f * M_PI;
+            }
+      - addressable_lambda:
+          name: "Alert Blink"
+          update_interval: 500ms
+          lambda: |-
+            static bool on = false;
+            on = !on;
+            for (int i = 0; i < it.size(); i++) {
+              it[i] = on ? current_color : Color::BLACK;
+            }
+  - platform: partition
+    id: ws2812_left
+    name: "LED Left"
+    restore_mode: ALWAYS_OFF
+    segments:
+      - id: ws2812
+        from: 0
+        to: 2
+    effects:
+      - addressable_lambda:
+          name: "Left Flow"
+          update_interval: 500ms
+          lambda: |-
+            static uint8_t pos = 0;
+            if (initial_run) {
+              pos = 0;
+              it.all() = Color::BLACK;
+              return;
+            }
+            it.all().fade_to_black(100);
+            it[pos] = Color(255, 0, 0);
+            pos = (pos + 1) % 3;
+  - platform: partition
+    id: ws2812_right
+    name: "LED Right"
+    restore_mode: ALWAYS_OFF
+    segments:
+      - id: ws2812
+        from: 3
+        to: 5
+        reversed: true
+    effects:
+      - addressable_lambda:
+          name: "Right Flow"
+          update_interval: 500ms
+          lambda: |-
+            static uint8_t pos = 0;
+            if (initial_run) {
+              pos = 0;
+              it.all() = Color::BLACK;
+              return;
+            }
+            it.all().fade_to_black(100);
+            it[pos] = Color(0, 255, 0);
+            pos = (pos + 1) % 3;
+  - platform: partition
+    id: ws2812_1
+    name: "LED 1"
+    restore_mode: ALWAYS_OFF
+    segments:
+      - id: ws2812
+        from: 0
+        to: 0
+    # 每顆都能選效果，LED 2～6 共用同一份
+    effects: &single_led_effects
+      - addressable_lambda:
+          name: "Breath"
+          update_interval: 15ms
+          lambda: |-
+            static float phase = 0.0f;
+            if (initial_run) {
+              phase = 0.0f;
+            }
+            float level = (sin(phase) + 1.0f) / 2.0f;
+            uint8_t scale = 20 + level * 235;
+            for (int i = 0; i < it.size(); i++) {
+              it[i] = current_color * scale;
+            }
+            phase += 0.05f;
+            if (phase >= 2.0f * M_PI) {
+              phase -= 2.0f * M_PI;
+            }
+      - addressable_lambda:
+          name: "Alert Blink"
+          update_interval: 500ms
+          lambda: |-
+            static bool on = false;
+            on = !on;
+            for (int i = 0; i < it.size(); i++) {
+              it[i] = on ? current_color : Color::BLACK;
+            }
+  - platform: partition
+    id: ws2812_2
+    name: "LED 2"
+    restore_mode: ALWAYS_OFF
+    segments:
+      - id: ws2812
+        from: 1
+        to: 1
+    effects: *single_led_effects
+  - platform: partition
+    id: ws2812_3
+    name: "LED 3"
+    restore_mode: ALWAYS_OFF
+    segments:
+      - id: ws2812
+        from: 2
+        to: 2
+    effects: *single_led_effects
+  - platform: partition
+    id: ws2812_4
+    name: "LED 4"
+    restore_mode: ALWAYS_OFF
+    segments:
+      - id: ws2812
+        from: 3
+        to: 3
+    effects: *single_led_effects
+  - platform: partition
+    id: ws2812_5
+    name: "LED 5"
+    restore_mode: ALWAYS_OFF
+    segments:
+      - id: ws2812
+        from: 4
+        to: 4
+    effects: *single_led_effects
+  - platform: partition
+    id: ws2812_6
+    name: "LED 6"
+    restore_mode: ALWAYS_OFF
+    segments:
+      - id: ws2812
+        from: 5
+        to: 5
+    effects: *single_led_effects
