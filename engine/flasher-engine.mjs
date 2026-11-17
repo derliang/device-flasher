@@ -289,11 +289,10 @@ export class Flasher {
         if (e && e.name === 'NotFoundError') throw new FlasherError('user-cancelled', {}, { cause: e });
         throw new FlasherError('connect-failed', { reason: 'request-port' }, { cause: e });
       }
-      // ESP32-C3 走 USB 原生序列，鮑率不影響連線本身；重置時序偶爾失敗，所以同一組鮑率重試、並設逾時（卡住時關掉重來）。
-      // （ESP8266 的升速／退回 115200 邏輯【目前未對外使用】：S31 不走 Web Serial，保留備用。）
+      // 重置時序偶爾失敗，所以先在目標鮑率重試 attemptsPerBaud 次，都失敗才改用備援鮑率；每次都有逾時（卡住時關掉重來）。
       const bauds = baudrate === fallbackBaudrate ? [baudrate] : [baudrate, fallbackBaudrate];
       const attempts = [];
-      for (let round = 0; round < attemptsPerBaud; round++) for (const b of bauds) attempts.push(b);
+      for (const b of bauds) for (let round = 0; round < attemptsPerBaud; round++) attempts.push(b);
       let lastErr = null;
       for (let i = 0; i < attempts.length; i++) {
         throwIfAborted(signal);

@@ -4,6 +4,7 @@
 
 import { FlasherError, ERROR_TABLE } from '../engine/errors.mjs';
 import { ENGINE_VERSION } from '../engine/flasher-engine.mjs';
+import { PROFILES } from '../engine/profiles.mjs';
 import {
   CURRENT_TERMS_VERSION, createConsentStore, evaluateStoredConsent, gateProgress, isScrolledToEnd,
   makeRecord, consentForEngine, consentRecordJson,
@@ -644,7 +645,7 @@ export function startApp(opts = {}) {
     if (idleBtn) { idleBtn.disabled = true; idleBtn.innerHTML = `<span class="spin"></span>${L('連接中…', 'Connecting…')}`; }
     try {
       S.flasher = await makeFlasher(consentForEngine(S.consent), {});
-      await S.flasher.connect();
+      await S.flasher.connect({ baudrate: PROFILES.presence.recommendedBaud, fallbackBaudrate: 115200 });
       S.device = await S.flasher.identify({ expectedProfile: 'presence' });
       setBusy(false);
       setScreen(S.device.profileMatch ? 'identified' : 'id-error');

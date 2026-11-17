@@ -10,8 +10,9 @@ export const PROFILES = {
     label: { 'zh-TW': '人體感應器', en: 'Presence sensor' },
     chip: 'ESP32-C3',
     flashSizeBytes: 4 * MB,
-    // ESP32-C3 USB 原生序列（USB-Serial/JTAG）不受鮑率影響；115200 即可。
-    recommendedBaud: 115200,
+    // ESP32-C3 USB 原生序列（USB-Serial/JTAG）；建議 460800（921600 在瀏覽器曾不穩，不用）。
+    // 網頁以此為連線鮑率，失敗時退回 115200。
+    recommendedBaud: 460800,
     // 位址 0 的開機映像第一個位元組：ESP_IMAGE_MAGIC = 0xE9（esptool-js bundle 內 ESP_IMAGE_MAGIC=233）。
     // ESP32-C3 的 bootloader 就在 flash 位址 0x0。
     bootMagic: 0xe9,
