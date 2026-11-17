@@ -18,11 +18,29 @@ import {
 export const ENGINE_VERSION = '0.2.0';
 export { CURRENT_TERMS_VERSION };
 const READ_CHUNK = 0x10000; // 64 KB：分塊讀取，才能在塊與塊之間中止、回報進度
+// 連線與單塊讀取偶爾會卡住不動，esptool-js 自己要等很久才逾時；重新連線（重新載入 stub）後就能繼續。
+// 所以引擎自己設逾時、重連、重試，不等 esptool-js。
+const CONNECT_TIMEOUT_MS = 20000; // 單次連線（重置、同步、載入 stub）最長等待
+const CHUNK_TIMEOUT_MS = 20000; // 64 KB 單塊讀取最長等待（正常約 1～5 秒）
+const CONNECT_ATTEMPTS = 3; // 每種鮑率最多試幾次
+const CHUNK_RECOVERIES = 3; // 單塊讀取失敗後，最多重連幾次再重讀
 
 // ---------- 小工具 ----------
 
 function throwIfAborted(signal) {
   if (signal && signal.aborted) throw new FlasherError('aborted');
+}
+
+const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** 讓 promise 在 ms 毫秒內沒結果就以 makeErr() 失敗；原 promise 之後的失敗不會變成未處理的拒絕。 */
+function withTimeout(promise, ms, makeErr) {
+  promise.catch(() => {});
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(makeErr()), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 function toU8(data) {
@@ -141,6 +159,7 @@ export class Flasher {
   #transport = null;
   #loader = null;
   #port = null;
+  #baud = 115200;
   #device = null; // identify() 的結果
   #busy = false;
   #backupState = null; // {saved, mac, sha256, files, method, verifiable}
@@ -256,7 +275,7 @@ export class Flasher {
    * @param {{baudrate?:number, fallbackBaudrate?:number, port?:object, portFilters?:object[], signal?:AbortSignal}} [opts]
    * @returns {Promise<{baudrate:number, fellBack:boolean}>}
    */
-  async connect({ baudrate = 115200, fallbackBaudrate = 115200, port, portFilters, signal } = {}) {
+  async connect({ baudrate = 115200, fallbackBaudrate = 115200, port, portFilters, signal, attemptsPerBaud = CONNECT_ATTEMPTS, connectTimeoutMs = CONNECT_TIMEOUT_MS, retryDelayMs = 400 } = {}) {
     this.#assertConsent();
     return this.#run(async () => {
       if (!this.#serial || typeof this.#serial.requestPort !== 'function') {
@@ -270,35 +289,94 @@ export class Flasher {
         if (e && e.name === 'NotFoundError') throw new FlasherError('user-cancelled', {}, { cause: e });
         throw new FlasherError('connect-failed', { reason: 'request-port' }, { cause: e });
       }
-      // ESP32-C3 走 USB 原生序列，鮑率不影響。
+      // ESP32-C3 走 USB 原生序列，鮑率不影響連線本身；重置時序偶爾失敗，所以同一組鮑率重試、並設逾時（卡住時關掉重來）。
       // （ESP8266 的升速／退回 115200 邏輯【目前未對外使用】：S31 不走 Web Serial，保留備用。）
-      const attempts = baudrate === fallbackBaudrate ? [baudrate] : [baudrate, fallbackBaudrate];
+      const bauds = baudrate === fallbackBaudrate ? [baudrate] : [baudrate, fallbackBaudrate];
+      const attempts = [];
+      for (let round = 0; round < attemptsPerBaud; round++) for (const b of bauds) attempts.push(b);
       let lastErr = null;
       for (let i = 0; i < attempts.length; i++) {
         throwIfAborted(signal);
         const b = attempts[i];
-        const transport = new this.#Transport(this.#port, false);
-        const loader = new this.#ESPLoader({
-          transport,
-          baudrate: b,
-          romBaudrate: 115200,
-          terminal: this.#terminal,
-          debugLogging: false,
-        });
         try {
-          await loader.main();
+          const { transport, loader } = await this.#openLoader(b, connectTimeoutMs);
           this.#transport = transport;
           this.#loader = loader;
+          this.#baud = b;
           this.#device = null;
           this.#backupState = null;
-          return { baudrate: b, fellBack: i > 0 };
+          return { baudrate: b, fellBack: b !== baudrate, attempt: i + 1 };
         } catch (e) {
           lastErr = e;
-          try { await transport.disconnect(); } catch { /* 忽略 */ }
+          if (i < attempts.length - 1) await delay(retryDelayMs);
         }
       }
       throw new FlasherError('connect-failed', { attempts }, { cause: lastErr });
     });
+  }
+
+  /** 開一條新的 Transport＋ESPLoader 並執行 main()；逾時或失敗就把這條連線關掉再丟錯（不留半開的埠）。 */
+  async #openLoader(baud, timeoutMs) {
+    const transport = new this.#Transport(this.#port, false);
+    const loader = new this.#ESPLoader({
+      transport,
+      baudrate: baud,
+      romBaudrate: 115200,
+      terminal: this.#terminal,
+      debugLogging: false,
+    });
+    try {
+      await withTimeout(loader.main(), timeoutMs, () => new Error('connect-timeout'));
+    } catch (e) {
+      try { await withTimeout(transport.disconnect(), 5000, () => new Error('disconnect-timeout')); } catch { /* 忽略 */ }
+      throw e;
+    }
+    return { transport, loader };
+  }
+
+  /** 設備端 MD5：逾時（依長度，4 MB 約 3 秒，最少給 30 秒）或失敗就重連後重算，最多 2 次；它只讀 flash，重算是安全的。 */
+  async #deviceMd5(address, length, timeoutOverrideMs) {
+    const timeoutMs = timeoutOverrideMs || Math.max(30000, Math.ceil(length / 0x10000) * 2000);
+    let lastErr = null;
+    for (let k = 0; k <= 2; k++) {
+      try {
+        return await withTimeout(this.#requireLoader().flashMd5sum(address, length), timeoutMs, () => new Error('md5-timeout'));
+      } catch (e) {
+        lastErr = e;
+        if (k === 2) break;
+        try {
+          await this.#recoverLoader();
+        } catch (e2) {
+          lastErr = e2;
+          break;
+        }
+      }
+    }
+    throw lastErr;
+  }
+
+  /** 讀取卡住或失敗後：關掉舊連線、在同一個埠重新連線（重新載入 stub）。保留 identify 與備份狀態。 */
+  async #recoverLoader() {
+    const old = this.#transport;
+    this.#transport = null;
+    this.#loader = null;
+    if (old) {
+      try { await withTimeout(old.disconnect(), 5000, () => new Error('disconnect-timeout')); } catch { /* 忽略 */ }
+    }
+    await delay(300);
+    let lastErr = null;
+    for (let k = 0; k < CONNECT_ATTEMPTS; k++) {
+      try {
+        const { transport, loader } = await this.#openLoader(this.#baud, CONNECT_TIMEOUT_MS);
+        this.#transport = transport;
+        this.#loader = loader;
+        return;
+      } catch (e) {
+        lastErr = e;
+        await delay(400);
+      }
+    }
+    throw new FlasherError('connect-failed', { reason: 'recover-failed' }, { cause: lastErr });
   }
 
   async #teardown() {
@@ -308,7 +386,7 @@ export class Flasher {
     this.#device = null;
     this.#backupState = null;
     if (t) {
-      try { await t.disconnect(); } catch { /* 忽略 */ }
+      try { await withTimeout(t.disconnect(), 5000, () => new Error('disconnect-timeout')); } catch { /* 忽略 */ }
     }
   }
 
@@ -360,7 +438,7 @@ export class Flasher {
    *      ②只讀一次，ESP8266 經 115200～460800 傳 4 MB 的時間不加倍；③ESP8266 的 ROM 本身不支援 MD5 指令，但 esptool-js 的 main() 一律先載入 stub（bundle 內 runStub），stub 支援 ESP_SPI_FLASH_MD5（常數 19）——此點未實機驗證。
    * 'double-read'：讀兩次逐位元組比對（備援，時間加倍）；'both' 兩者都做。
    */
-  async backup({ onProgress, signal, verify = 'md5', chunkSize = READ_CHUNK } = {}) {
+  async backup({ onProgress, signal, verify = 'md5', chunkSize = READ_CHUNK, chunkTimeoutMs = CHUNK_TIMEOUT_MS, md5TimeoutMs } = {}) {
     this.#assertConsent();
     return this.#run(async () => {
       const loader = this.#requireLoader();
@@ -372,20 +450,41 @@ export class Flasher {
       const passes = wantDouble ? 2 : 1;
       const total = size * passes + (wantMd5 ? size : 0);
 
+      // 單塊讀取：逾時或失敗就重連（重新載入 stub）再重讀這一塊，最多 CHUNK_RECOVERIES 次；全部失敗才回報 read-failed。
+      const readChunk = async (off, n) => {
+        let lastErr = null;
+        let lastShort = null;
+        for (let k = 0; k <= CHUNK_RECOVERIES; k++) {
+          throwIfAborted(signal);
+          try {
+            const part = await withTimeout(this.#loader.readFlash(off, n), chunkTimeoutMs, () => new Error('chunk-timeout'));
+            if (part && part.length === n) return part;
+            lastShort = part ? part.length : 0;
+            lastErr = null;
+          } catch (e) {
+            lastErr = e;
+            lastShort = null;
+          }
+          if (k === CHUNK_RECOVERIES) break;
+          this.#emit(onProgress, { stage: 'recovering', offset: off, attempt: k + 1 });
+          try {
+            await this.#recoverLoader();
+          } catch (e) {
+            lastErr = e;
+            lastShort = null;
+            break;
+          }
+        }
+        if (lastShort !== null) throw new FlasherError('read-failed', { offset: off, reason: 'short-read', got: lastShort });
+        throw new FlasherError('read-failed', { offset: off, reason: 'read-error' }, { cause: lastErr });
+      };
+
       const readAll = async (passIndex) => {
         const buf = new Uint8Array(size);
         for (let off = 0; off < size; off += chunkSize) {
           throwIfAborted(signal);
           const n = Math.min(chunkSize, size - off);
-          let part;
-          try {
-            part = await loader.readFlash(off, n);
-          } catch (e) {
-            throw new FlasherError('read-failed', { offset: off, reason: 'read-error' }, { cause: e });
-          }
-          if (!part || part.length !== n) {
-            throw new FlasherError('read-failed', { offset: off, reason: 'short-read', got: part ? part.length : 0 });
-          }
+          const part = await readChunk(off, n);
           buf.set(part, off);
           this.#emit(onProgress, { stage: 'reading', done: passIndex * size + off + n, total });
         }
@@ -400,7 +499,7 @@ export class Flasher {
         this.#emit(onProgress, { stage: 'verifying', done: passes * size, total });
         let devMd5;
         try {
-          devMd5 = await loader.flashMd5sum(0, size);
+          devMd5 = await this.#deviceMd5(0, size, md5TimeoutMs);
         } catch (e) {
           throw new FlasherError('read-failed', { reason: 'device-md5-error' }, { cause: e });
         }
@@ -585,7 +684,7 @@ export class Flasher {
       const expected = md5Hex(s.data);
       let got;
       try {
-        got = await loader.flashMd5sum(s.address, s.data.length);
+        got = await this.#deviceMd5(s.address, s.data.length);
       } catch (e) {
         throw new FlasherError('verify-failed', { address: s.address, reason: 'device-md5-error' }, { cause: e, partialWrite: true });
       }
@@ -730,7 +829,7 @@ export class Flasher {
         for (const r of protectedRanges) {
           const len = Math.min(r.end, dev.flashSizeBytes) - r.start;
           if (len <= 0) continue;
-          preHashes.push({ ...r, length: len, md5: String(await loader.flashMd5sum(r.start, len)).toLowerCase() });
+          preHashes.push({ ...r, length: len, md5: String(await this.#deviceMd5(r.start, len)).toLowerCase() });
         }
       }
 
@@ -739,7 +838,7 @@ export class Flasher {
       for (const h of preHashes) {
         let after;
         try {
-          after = String(await loader.flashMd5sum(h.start, h.length)).toLowerCase();
+          after = String(await this.#deviceMd5(h.start, h.length)).toLowerCase();
         } catch (e) {
           throw new FlasherError('verify-failed', { reason: 'protected-md5-error', region: h.name }, { cause: e, partialWrite: true });
         }

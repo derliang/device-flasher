@@ -607,6 +607,8 @@ export function startApp(opts = {}) {
       bind(sc, { pct: '100%', speed: '', eta: '' });
       setBar(100);
       logLine('resetting');
+    } else if (ev.stage === 'recovering') {
+      logLine(`recovering (retry ${ev.attempt})`); // 讀取卡住或失敗，引擎正在重新連線後重讀同一塊
     } else if (ev.stage === 'done') {
       logLine('done');
     }
