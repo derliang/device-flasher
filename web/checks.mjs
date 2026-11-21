@@ -52,6 +52,36 @@ export function restoreChecks({ binLength, firstByte, sha256, meta, metaError, d
   return { items, hardFail: items.some((i) => i.level === 'no'), macDiffers };
 }
 
+/** 分區表位置與魔數（與引擎 profiles.mjs 一致）。 */
+const PT_ADDRESS = 0x8000;
+
+/**
+ * 自訂韌體（使用者自己的 .bin）的逐項檢查。只接受「完整映像」（從位址 0 寫入、0x8000 有分區表，
+ * 例如 ESPHome 的 factory 型）；只有 app 的 OTA 型映像開頭也是 0xE9，但寫到位址 0 會蓋掉開機程式，一律拒絕。
+ * 真正的把關仍在引擎（update() 會重新檢查標頭、晶片 ID、分區表與容量）。
+ * @param {{binLength:number, head:Uint8Array|null, sha256:string, device:{flashSizeBytes:number|null}, imageChipId:number, bootMagic?:number}} s
+ *   head：檔案開頭至少 0x8002 位元組（檔案較小時就是整個檔案）
+ * @returns {{items:{id:string, level:'ok'|'no'|'info', data:object}[], hardFail:boolean, kind:'factory'|'app-only'|'unknown'}}
+ */
+export function customFirmwareChecks({ binLength, head, sha256, device, imageChipId, bootMagic = 0xe9 }) {
+  const items = [];
+  const push = (id, level, data = {}) => items.push({ id, level, data });
+  const h = head || new Uint8Array(0);
+  const max = device && device.flashSizeBytes;
+
+  const sizeOk = Number.isInteger(binLength) && binLength > 0 && !!max && binLength <= max;
+  push('size', sizeOk ? 'ok' : 'no', { actual: binLength, max });
+  const headerOk = h.length > 0 && h[0] === bootMagic;
+  push('header', headerOk ? 'ok' : 'no', { actual: h[0] });
+  const chipId = h.length >= 14 ? h[12] | (h[13] << 8) : null;
+  push('imgchip', chipId === imageChipId ? 'ok' : 'no', { actual: chipId, expected: imageChipId });
+  const hasPt = h.length >= PT_ADDRESS + 2 && h[PT_ADDRESS] === 0xaa && h[PT_ADDRESS + 1] === 0x50;
+  const kind = hasPt ? 'factory' : headerOk ? 'app-only' : 'unknown';
+  push('layout', hasPt ? 'ok' : 'no', { kind });
+  push('sha', 'info', { sha256 });
+  return { items, hardFail: items.some((i) => i.level === 'no'), kind };
+}
+
 /** 備份檔名中的 MAC 是否看得出來是同一台（僅供檔案列顯示用，不作為判斷依據）。 */
 export function safeFileLabel(name) {
   return String(name || '').replace(/[\u0000-\u001f<>]/g, '').slice(0, 120);

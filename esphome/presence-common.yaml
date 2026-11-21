@@ -22,7 +22,8 @@
 # 自訂 ld2410 元件在 components/ld2410（修改自 ESPHome 2026.10.1，見 NOTICE.md）。
 
 substitutions:
-  firmware_version: "4.3.2"
+  # 對外版號（日期編號 YYYY.MM.DD，同日第二版起加 .2）：刷機頁與 releases.json 的唯一版號來源，會被編進 bin。
+  firmware_version: "2026.11.21"
   # 3.3：網頁版本（必須等於 presence-web.js 的 WEB_VERSION）
   web_version: "4.25"
   # 3.7 去重：九格／十八格的實體清單與距離解析度，原本在 lambda 裡複製貼上 11＋5 處；改成文字取代，產生的 C++ 完全相同

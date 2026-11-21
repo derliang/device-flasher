@@ -15,7 +15,7 @@ import {
   parsePartitionTableProtected,
 } from './profiles.mjs';
 
-export const ENGINE_VERSION = '0.2.0';
+export const ENGINE_VERSION = '0.3.0';
 export { CURRENT_TERMS_VERSION };
 const READ_CHUNK = 0x10000; // 64 KB：分塊讀取，才能在塊與塊之間中止、回報進度
 // 連線與單塊讀取偶爾會卡住不動，esptool-js 自己要等很久才逾時；重新連線（重新載入 stub）後就能繼續。
@@ -163,7 +163,7 @@ export class Flasher {
   #device = null; // identify() 的結果
   #busy = false;
   #backupState = null; // {saved, mac, sha256, files, method, verifiable}
-  #skipLog = [];
+  #noBackupLog = []; // 沒有已存檔備份就寫入的紀錄（只在記憶體，不上傳）
   #consentLive;
   #consentSnap;
 
@@ -210,7 +210,7 @@ export class Flasher {
       busy: this.#busy,
       device: this.#device ? { ...this.#device } : null,
       backup: this.#backupState ? { ...this.#backupState } : null,
-      skippedBackups: [...this.#skipLog],
+      writesWithoutBackup: [...this.#noBackupLog],
     };
   }
 
@@ -247,8 +247,12 @@ export class Flasher {
     }
   }
 
-  /** 所有寫入（restore／update）的共同閘門。 */
-  #requireWritable({ skipBackup } = {}) {
+  /**
+   * 所有寫入（restore／update）的共同閘門：同意、已辨識、設備符合設定檔（晶片與容量）。
+   * 備份是建議、不是條件：沒有這台設備已存檔的備份也可以寫入，只在回傳值記下 backup.status:'none'，
+   * 並留在 getState().writesWithoutBackup。其他安全檢查（受保護區、MD5 驗證、MAC 確認、擦除確認）不受影響。
+   */
+  #requireWritable() {
     this.#assertConsent(); // 寫入類操作：進閘門時再檢查一次
     const dev = this.#requireDevice();
     if (!dev.profileMatch) {
@@ -261,12 +265,9 @@ export class Flasher {
     if (b && b.saved && b.mac === dev.mac) {
       return { status: 'saved', files: b.files, method: b.method, verifiable: b.verifiable, sha256: b.sha256 };
     }
-    if (skipBackup === true) {
-      const rec = { at: new Date(this.#now()).toISOString(), mac: dev.mac, profile: dev.profile };
-      this.#skipLog.push(rec);
-      return { status: 'skipped', at: rec.at };
-    }
-    throw new FlasherError('backup-not-saved', { mac: dev.mac });
+    const rec = { at: new Date(this.#now()).toISOString(), mac: dev.mac, profile: dev.profile };
+    this.#noBackupLog.push(rec);
+    return { status: 'none', at: rec.at };
   }
 
   // ---------- connect / disconnect ----------
@@ -434,7 +435,7 @@ export class Flasher {
    * 讀整顆 flash 並驗證。
    * 驗證方式預設 'md5'：讀一次，再用設備端 flashMd5sum 與本機資料的 MD5 比對。
    * 理由：①設備端 MD5 由晶片直接對 flash 內容計算，不經序列線路，能抓到傳輸中的位元錯誤；
-   *      ②只讀一次，ESP8266 經 115200～460800 傳 4 MB 的時間不加倍；③ESP8266 的 ROM 本身不支援 MD5 指令，但 esptool-js 的 main() 一律先載入 stub（bundle 內 runStub），stub 支援 ESP_SPI_FLASH_MD5（常數 19）——此點未實機驗證。
+   *      ②只讀一次，經 115200～460800 傳 4 MB 的時間不加倍。
    * 'double-read'：讀兩次逐位元組比對（備援，時間加倍）；'both' 兩者都做。
    */
   async backup({ onProgress, signal, verify = 'md5', chunkSize = READ_CHUNK, chunkTimeoutMs = CHUNK_TIMEOUT_MS, md5TimeoutMs } = {}) {
@@ -712,13 +713,13 @@ export class Flasher {
 
   /**
    * @param {Uint8Array} bytes 備份 .bin
-   * @param {{meta?:object|string, confirmedDifferentMac?:boolean, skipBackup?:boolean, allowNoMeta?:boolean, signal?:AbortSignal, onProgress?:Function}} [opts]
+   * @param {{meta?:object|string, confirmedDifferentMac?:boolean, allowNoMeta?:boolean, signal?:AbortSignal, onProgress?:Function}} [opts]
    */
   async restore(bytes, opts = {}) {
-    const { meta, confirmedDifferentMac, skipBackup, allowNoMeta, signal, onProgress } = opts;
+    const { meta, confirmedDifferentMac, allowNoMeta, signal, onProgress } = opts;
     this.#assertConsent();
     return this.#run(async () => {
-      const backup = this.#requireWritable({ skipBackup }); // ①設備與容量／晶片 ②目前設備的備份已存檔（或明示略過）
+      const backup = this.#requireWritable(); // 設備與容量／晶片；備份狀態只記錄、不阻擋
       const dev = this.#device;
       const bin = toU8(bytes);
       const v = await this.validateBackup(bin, meta, dev, { allowNoMeta });
@@ -773,15 +774,15 @@ export class Flasher {
 
   /**
    * @param {{data:Uint8Array|ArrayBuffer, address:number}[]} parts
-   * @param {{eraseAll?:boolean, confirmedEraseAll?:boolean, skipBackup?:boolean, onProtectedOverlap?:'split'|'error', signal?:AbortSignal, onProgress?:Function}} [opts]
+   * @param {{eraseAll?:boolean, confirmedEraseAll?:boolean, onProtectedOverlap?:'split'|'error', signal?:AbortSignal, onProgress?:Function}} [opts]
    *   預設 eraseAll:false。ESPHome 的 factory.bin 是從位址 0 開始的合併映像，中間以 0xFF 填滿，
    *   會蓋到 NVS；所以預設 onProtectedOverlap:'split'：把受保護區從寫入範圍「挖掉」，只寫其餘的段落。
    */
   async update(parts, opts = {}) {
-    const { eraseAll = false, confirmedEraseAll, skipBackup, onProtectedOverlap = 'split', signal, onProgress } = opts;
+    const { eraseAll = false, confirmedEraseAll, onProtectedOverlap = 'split', signal, onProgress } = opts;
     this.#assertConsent();
     return this.#run(async () => {
-      const backup = this.#requireWritable({ skipBackup });
+      const backup = this.#requireWritable();
       const dev = this.#device;
       const profile = this.#profiles[dev.profile];
       const loader = this.#requireLoader();
@@ -792,7 +793,17 @@ export class Flasher {
         const data = toU8(p.data);
         if (data.length === 0) throw new FlasherError('bad-parts', { reason: 'empty-part', index: i });
         if (p.address + data.length > dev.flashSizeBytes) throw new FlasherError('bad-parts', { reason: 'beyond-flash', index: i });
-        if (p.address === 0 && data[0] !== profile.bootMagic) throw new FlasherError('bad-parts', { reason: 'boot-header', index: i });
+        if (p.address === 0) {
+          if (data[0] !== profile.bootMagic) throw new FlasherError('bad-parts', { reason: 'boot-header', index: i });
+          if (profile.imageChipId != null && (data.length < 16 || (data[12] | (data[13] << 8)) !== profile.imageChipId)) {
+            throw new FlasherError('bad-parts', { reason: 'image-chip-id', index: i, expected: profile.imageChipId });
+          }
+          // 從位址 0 寫、又蓋過分區表位置的映像，必須是「完整映像」（0x8000 有分區表）。
+          // 只有 app 的映像（OTA 型）開頭同樣是 0xE9，寫到位址 0 會蓋掉開機程式，所以拒絕。
+          if (data.length > PARTITION_TABLE_ADDRESS && !(data[PARTITION_TABLE_ADDRESS] === 0xaa && data[PARTITION_TABLE_ADDRESS + 1] === 0x50)) {
+            throw new FlasherError('bad-parts', { reason: 'no-partition-table', index: i });
+          }
+        }
         return { address: p.address, data };
       });
       const sorted = [...norm].sort((a, b) => a.address - b.address);

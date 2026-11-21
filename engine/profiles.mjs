@@ -4,7 +4,7 @@
 const MB = 1024 * 1024;
 
 export const PROFILES = {
-  // 人體感應器：ESP32-C3，4 MB（ESPHome：variant esp32c3、flash_size 4MB）。目前唯一對外使用的設備。
+  // 人體感應器：ESP32-C3，4 MB（ESPHome：variant esp32c3、flash_size 4MB）。目前唯一支援的設備。
   presence: {
     id: 'presence',
     label: { 'zh-TW': '人體感應器', en: 'Presence sensor' },
@@ -16,27 +16,14 @@ export const PROFILES = {
     // 位址 0 的開機映像第一個位元組：ESP_IMAGE_MAGIC = 0xE9（esptool-js bundle 內 ESP_IMAGE_MAGIC=233）。
     // ESP32-C3 的 bootloader 就在 flash 位址 0x0。
     bootMagic: 0xe9,
+    // 映像擴充標頭的晶片 ID（位址 0 開機映像的第 12–13 位元組，little-endian）：ESP32-C3 = 5
+    // 【文件】esptool-js bundle 內 ESP32-C3 的 IMAGE_CHIP_ID=5。寫到位址 0 的映像晶片 ID 不符就拒絕。
+    imageChipId: 5,
     // 受保護區。靜態部分是「讀不到分區表時」的保底；實際更新時會再讀設備上的分區表，
     // 把 type=data/subtype=nvs（含 nvs_keys）的分區也加進去。
     // 【推測】ESPHome 使用 esp-idf 框架，NVS 的確切範圍要看實際分區表，所以才動態讀。
     protectedRegions: [{ name: 'nvs-default-guess', start: 0x9000, end: 0xe000 }],
     readPartitionTable: true,
-  },
-  // S31 插座：ESP8266（ESPHome board: esp12e），4 MB。
-  // 【目前未對外使用】S31 設定檔與 ESP8266 鮑率處理僅保留備用，刷機頁目前只提供感應器的 USB 直連；未對真機測試。
-  s31: {
-    id: 's31',
-    label: { 'zh-TW': 'S31 智慧插座', en: 'S31 smart plug' },
-    chip: 'ESP8266',
-    flashSizeBytes: 4 * MB,
-    // 經 USB 轉 TTL；預設 115200，可升到 460800（失敗退回 115200）。【推測，未實機驗證】
-    recommendedBaud: 460800,
-    // 【文件】ESP8266 映像標頭同樣以 0xE9 開頭（esptool-js 同一個 ESP_IMAGE_MAGIC）。
-    bootMagic: 0xe9,
-    // 【推測】ESPHome 的 ESP8266 偏好設定存在 flash 高位，SDK 參數區在最後 16 KB；
-    // 保守保護 4 MB 的後 1 MB（0x300000 起）。一般 app 映像小於 1 MB，不會碰到。
-    protectedRegions: [{ name: 'prefs-and-sdk-params-guess', start: 0x300000, end: 0x400000 }],
-    readPartitionTable: false, // ESP8266 沒有 ESP32 式分區表
   },
 };
 

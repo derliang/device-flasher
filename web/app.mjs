@@ -1,4 +1,4 @@
-// 刷機頁的畫面控制器：同意閘門 → 感應器（連接、備份、更新、還原）／S31（尚未開放）。
+// 刷機頁的畫面控制器：同意閘門 → 感應器（連接、備份〔建議〕、更新、還原、刷入自己的韌體）。
 // 純邏輯在 consent-gate／releases／checks／progress／route（有 node 測試）；這裡只負責 DOM 與引擎的接線。
 // 全部在瀏覽器本機執行：不載入外部資源、不上傳任何東西。引擎見 ../engine/README.md。
 
@@ -9,8 +9,8 @@ import {
   CURRENT_TERMS_VERSION, createConsentStore, evaluateStoredConsent, gateProgress, isScrolledToEnd,
   makeRecord, consentForEngine, consentRecordJson,
 } from './consent-gate.mjs';
-import { pickRelease, parseReleases, resolveFileUrl, verifyDownload, bytesToHex } from './releases.mjs';
-import { macTail, confirmReady, restoreChecks, buildErrorReport, safeFileLabel } from './checks.mjs';
+import { listReleases, parseReleases, resolveFileUrl, verifyDownload, bytesToHex, displayVersion, releaseNotes, releaseDate } from './releases.mjs';
+import { macTail, confirmReady, restoreChecks, customFirmwareChecks, buildErrorReport, safeFileLabel } from './checks.mjs';
 import { PHASES, phaseIndex, overallFraction, createRateTracker, formatEta, formatSpeed, formatSize, formatBytesWithCommas } from './progress.mjs';
 import { resolveRoute, serialSupported } from './route.mjs';
 import { TERMS_CLAUSES } from './terms-content.mjs';
@@ -44,12 +44,12 @@ export function L(zh, en) {
   return `<span class="l zh">${esc(zh)}</span><span class="l en">${esc(en)}</span>`;
 }
 
-const STEP_LABELS = [['連接', 'Connect'], ['備份', 'Backup'], ['更新／還原', 'Update / Restore']];
+const STEP_LABELS = [['連接', 'Connect'], ['選擇操作', 'Choose'], ['確認', 'Confirm'], ['執行', 'Run']];
 export function stepsHtml(cur) {
   const items = STEP_LABELS.map(([zh, en], i) => {
     const n = i + 1;
     const cls = n < cur ? 'done' : n === cur ? 'cur' : '';
-    return `<li class="${cls}"><span class="lab"><span class="n">${n}</span> ${L(zh, en)}</span></li>`;
+    return `<li class="${cls}"><span class="lab"><span class="n">0${n}</span> ${L(zh, en)}</span></li>`;
   });
   return `<ol class="steps" aria-label="流程 / Progress">${items.join('')}</ol>`;
 }
@@ -109,6 +109,11 @@ const PHASE_LABELS = {
     'verifying-write': ['驗證寫入內容（設備端 MD5）', 'Verify what was written (device-side MD5)'],
     resetting: ['重新啟動設備', 'Restart the device'],
   },
+  custom: {
+    writing: ['寫入你的韌體（受保護的設定區會被避開）', 'Write your firmware (the protected settings area is skipped)'],
+    'verifying-write': ['驗證寫入內容（設備端 MD5）', 'Verify what was written (device-side MD5)'],
+    resetting: ['重新啟動設備', 'Restart the device'],
+  },
   restore: {
     writing: ['寫入整顆 flash（4 MB）', 'Write the entire flash (4 MB)'],
     'verifying-write': ['以 MD5 驗證整顆 flash', 'Verify the entire flash with MD5'],
@@ -118,19 +123,25 @@ const PHASE_LABELS = {
 
 const RUN_COPY = {
   backup: {
-    steps: 2, bar: 'read', lock: 'read', icon: 'eye',
+    steps: 4, bar: 'read', lock: 'read', icon: 'eye',
     lockText: ['操作中：請不要拔線、不要關閉或重新整理這一頁', 'In progress: do not unplug the cable or close / reload this page'],
     lockSub: ['備份是唯讀的，即使中斷也不會損壞設備。', 'Backup is read-only; interrupting it cannot damage the device.'],
     title: ['正在備份韌體', 'Backing up firmware'], tag: ['唯讀', 'Read-only'], tagCls: 'read',
   },
   update: {
-    steps: 3, bar: 'write', lock: 'write', icon: 'warn',
+    steps: 4, bar: 'write', lock: 'write', icon: 'warn',
     lockText: ['寫入中：請不要拔線、不要關閉或重新整理這一頁', 'Writing: do not unplug the cable or close / reload this page'],
     lockSub: ['現在中斷可能讓設備無法開機。', 'Interrupting now may leave the device unable to boot.'],
     title: ['正在更新韌體', 'Updating firmware'], tag: ['寫入中', 'Writing'], tagCls: 'write',
   },
+  custom: {
+    steps: 4, bar: 'over', lock: 'over', icon: 'warn',
+    lockText: ['寫入中：請不要拔線、不要關閉或重新整理這一頁', 'Writing: do not unplug the cable or close / reload this page'],
+    lockSub: ['現在中斷可能讓設備無法開機。', 'Interrupting now may leave the device unable to boot.'],
+    title: ['正在刷入你的韌體', 'Flashing your firmware'], tag: ['覆寫中', 'Overwriting'], tagCls: 'over',
+  },
   restore: {
-    steps: 3, bar: 'over', lock: 'over', icon: 'warn',
+    steps: 4, bar: 'over', lock: 'over', icon: 'warn',
     lockText: ['寫入中：請不要拔線、不要關閉或重新整理這一頁', 'Writing: do not unplug the cable or close / reload this page'],
     lockSub: ['現在中斷可能讓設備無法開機。', 'Interrupting now may leave the device unable to boot.'],
     title: ['正在還原備份', 'Restoring backup'], tag: ['覆寫中', 'Overwriting'], tagCls: 'over',
@@ -163,7 +174,62 @@ function checkLine(item, dev) {
       return esc(item.id);
   }
 }
-const CHECK_ICON = { ok: 'check', no: 'x', warn: 'warn' };
+const CHECK_ICON = { ok: 'check', no: 'x', warn: 'warn', info: 'info' };
+
+/** 自訂韌體逐項檢查的文字。 */
+function fwCheckLine(item, dev) {
+  const d = item.data;
+  const mb = dev.flashSizeBytes ? Math.round(dev.flashSizeBytes / 1048576) : '?';
+  const n = (v) => formatBytesWithCommas(v);
+  switch (item.id) {
+    case 'size':
+      return item.level === 'ok'
+        ? L(`檔案大小 ${n(d.actual)} 位元組，不超過設備 flash ${mb} MB`, `File size ${n(d.actual)} bytes fits in the device's ${mb} MB flash`)
+        : L(`檔案大小 ${n(d.actual)} 位元組，是空檔或超過設備 flash ${mb} MB`, `File size ${n(d.actual)} bytes is empty or larger than the ${mb} MB flash`);
+    case 'header':
+      return item.level === 'ok' ? L('開機標頭正確（0xE9）', 'Boot header valid (0xE9)') : L('開機標頭不對（第一個位元組不是 0xE9），這不是韌體映像', 'Boot header invalid (the first byte is not 0xE9); this is not a firmware image');
+    case 'imgchip':
+      return item.level === 'ok'
+        ? L(`映像標記的晶片與目前設備相符（${dev.chip}）`, `The chip marked in the image matches the connected device (${dev.chip})`)
+        : L(`映像標記的晶片不是 ${dev.chip}，不能刷到這台設備`, `The image is not marked for ${dev.chip} and can't be flashed to this device`);
+    case 'layout':
+      return item.level === 'ok'
+        ? L('是完整映像（位址 0x8000 有分區表）', 'Complete image (partition table present at 0x8000)')
+        : d.kind === 'app-only'
+          ? L('位址 0x8000 沒有分區表：看起來是只有主程式的 OTA 型映像，不接受', 'No partition table at 0x8000: this looks like an app-only OTA image, which is not accepted')
+          : L('位址 0x8000 沒有分區表，不是完整映像', 'No partition table at 0x8000; not a complete image');
+    case 'sha':
+      return `${L('SHA-256（請自行與檔案來源公布的值比對）', 'SHA-256 (compare it yourself with the value published by the file’s source)')}<small class="mono">${esc(d.sha256 || '—')}</small>`;
+    default:
+      return esc(item.id);
+  }
+}
+
+/** Flash 配置圖（示意，非等比例）。mode：read｜update｜erase｜restore｜idle；pct＝進度（null 不畫進度線）。 */
+const FMAP_REGIONS = [['boot', '開機', 'Boot', 7], ['pt', '分區表', 'Part.', 6], ['nvs', '設定區', 'NVS', 9], ['app', '主程式', 'App', 40], ['rest', '其他／備用', 'Other', 38]];
+const FMAP_CLASS = {
+  read: { boot: 'r', pt: 'r', nvs: 'r', app: 'r', rest: 'r' },
+  update: { boot: 'w', pt: 'w', nvs: 'k', app: 'w', rest: '' },
+  erase: { boot: 'o', pt: 'o', nvs: 'o', app: 'o', rest: 'o' },
+  restore: { boot: 'o', pt: 'o', nvs: 'o', app: 'o', rest: 'o' },
+  idle: {},
+};
+const FMAP_LEGEND = {
+  read: [['r', '讀取', 'Read']],
+  update: [['w', '寫入', 'Written'], ['k', '保留（不寫）', 'Kept (skipped)'], ['n', '不動', 'Untouched']],
+  erase: [['o', '先擦除再寫入', 'Erased then written']],
+  restore: [['o', '整顆覆寫', 'Entire flash overwritten']],
+  idle: [['n', '尚未操作', 'No operation yet']],
+};
+export function fmapHtml(mode, pct = null) {
+  const cls = FMAP_CLASS[mode] || {};
+  const regions = FMAP_REGIONS.map(([k, zh, en, w]) => `<span class="rg ${cls[k] || ''}" style="--w:${w}">${L(zh, en)}</span>`).join('');
+  const done = pct == null ? '' : `<span class="done" data-role="map-done" style="width:calc(${Math.max(0, Math.min(100, pct))}% - 4px)"></span>`;
+  const legend = (FMAP_LEGEND[mode] || []).map(([c, zh, en]) => `<span><i class="lg-${c}"></i>${L(zh, en)}</span>`).join('');
+  return `<div class="fmap m-${mode}"><div class="fhead"><span class="eyebrow">${L('Flash 配置 · 4 MB', 'Flash map · 4 MB')}</span><span class="hint">${L('示意，非等比例', 'Schematic, not to scale')}</span></div>`
+    + `<div class="fbar" role="img" aria-label="${esc('Flash 配置圖 / Flash map')}">${regions}${done}</div>`
+    + `<div class="addr"><span>0x000000</span><span>0x3FFFFF</span></div><div class="legend">${legend}</div></div>`;
+}
 
 // ============================================================================
 export function startApp(opts = {}) {
@@ -188,14 +254,20 @@ export function startApp(opts = {}) {
   const S = {
     lang: /^zh/i.test((win.navigator && win.navigator.language) || '') ? 'zh' : 'en',
     consent: null, declined: false, oldConsent: null,
-    tab: 'sensor', screen: null, termsOpen: false,
+    screen: null, termsOpen: false,
     flasher: null, device: null, busy: false, abort: null, wake: null,
-    backup: null, backupConfirmed: false, skipChecked: false,
-    releases: [], releasesUrl: null, release: null,
-    erase: false, restore: null,
+    backup: null, backupConfirmed: false,
+    releases: [], releasesUrl: null, releaseList: [], release: null,
+    erase: false, restore: null, custom: null,
     lastError: null, lastOp: null,
     run: { op: null, tracker: createRateTracker(now), lastLogPct: -1, log: [] },
   };
+
+  const THEME_KEY = 'flasher-theme';
+  const applyTheme = (t) => { doc.documentElement.dataset.theme = t === 'light' ? 'light' : 'dark'; };
+  let theme = 'dark';
+  try { if (storage && storage.getItem(THEME_KEY) === 'light') theme = 'light'; } catch { /* 讀不到就用預設深色 */ }
+  applyTheme(theme);
 
   const gateRoot = $('#gate-root');
   const toolRoot = $('#tool-root');
@@ -315,14 +387,13 @@ export function startApp(opts = {}) {
     renderTerms(tr('termsListView'));
     S.screen = supported ? 'idle' : 'unsupported';
     const route = resolveRoute({ hash: win.location.hash, consented: true });
-    S.tab = route.target === 's31' ? 's31' : 'sensor';
     S.termsOpen = route.target === 'terms';
     render();
     loadReleases(); // 同意之後才抓 releases.json（同意前頁面不接觸任何韌體網址）
   }
 
   async function loadReleases() {
-    S.releases = []; S.releasesUrl = null; S.release = null;
+    S.releases = []; S.releasesUrl = null; S.releaseList = []; S.release = null;
     for (const url of releasesUrls) {
       try {
         const res = await fetchImpl(url, { cache: 'no-store' });
@@ -332,32 +403,24 @@ export function startApp(opts = {}) {
         break;
       } catch { /* 讀不到就當尚未開放，不顯示錯誤頁 */ }
     }
-    S.release = pickRelease(S.releases, 'presence', 'factory');
+    S.releaseList = listReleases(S.releases, 'presence', 'factory'); // 新到舊，最多 5 版
+    S.release = S.releaseList[0] || null; // 預設最新
     if (S.consent) refreshScreen();
   }
 
-  function backupUnlocked() {
+  /** 這台設備的備份已存檔（下載方式存出的要使用者確認過）。備份只是建議：不影響任何按鈕能不能按。 */
+  function backupSaved() {
     return !!(S.backup && S.backup.saved && (S.backup.verifiable || S.backupConfirmed));
   }
-  const skipMode = () => S.skipChecked && !backupUnlocked();
-  const ver = () => String(S.release ? S.release.version : '').replace(/^v/i, '');
+  const verText = () => (S.release ? displayVersion(S.release.version) : '');
 
   /** 依目前狀態顯示／隱藏畫面。 */
   function render() {
-    const tabsNav = $('nav.tabs', toolRoot);
     const pSensor = tr('panel-sensor');
-    const pS31 = tr('panel-s31');
     const tv = tr('scr-terms-view');
-    tabsNav.hidden = S.termsOpen;
-    pSensor.hidden = S.termsOpen || S.tab !== 'sensor';
-    pS31.hidden = S.termsOpen || S.tab !== 's31';
+    pSensor.hidden = S.termsOpen;
     tv.hidden = !S.termsOpen;
-    $$('[data-tab-btn]', toolRoot).forEach((b) => {
-      b.setAttribute('aria-selected', String(b.dataset.tabBtn === S.tab));
-      b.disabled = S.busy;
-    });
     $$('.screen', pSensor).forEach((s) => s.classList.toggle('on', s.dataset.screen === S.screen));
-    $('.screen', pS31).classList.add('on');
     tv.classList.toggle('on', S.termsOpen);
     if (S.termsOpen) {
       bind(tv, { acceptedVer: S.consent.termsVersion, acceptedAt: fmtDateTime(S.consent.acceptedAt) });
@@ -381,31 +444,19 @@ export function startApp(opts = {}) {
     switch (S.screen) {
       case 'identified': {
         bind(sc, { chip: dev.chip, macHtml: macHtml(dev.mac), flashMb: String(Math.round(dev.flashSizeBytes / 1048576)) });
-        const unlocked = backupUnlocked();
-        const skip = skipMode();
-        const fwOk = !!S.release;
-        const open = unlocked || skip;
-        box(sc, 'needBackup', !unlocked);
-        box(sc, 'haveBackup', unlocked);
-        for (const [id, needFw] of [['fnUpdate', true], ['fnRestore', false]]) {
-          const card = tr(id);
-          const noFw = needFw && !fwOk;
-          $('[data-role="locked"]', card).hidden = open;
-          $('[data-role="skipped"]', card).hidden = !(skip && !unlocked) || (needFw && noFw);
-          const nofw = $('[data-role="nofw"]', card);
-          if (nofw) { nofw.hidden = !(open && noFw); }
-          const btn = $('button[data-act]', card);
-          btn.disabled = !open || noFw;
-          card.classList.toggle('locked', !open || noFw);
-          card.setAttribute('aria-disabled', String(!open || noFw));
-          if (needFw) {
-            box(card, 'fwVersion', fwOk);
-            if (fwOk) bind(card, { latestVer: 'v' + ver() });
-          }
-        }
-        tr('skipBk').checked = S.skipChecked;
-        // 已有備份就不需要「略過備份」選項
-        $('[data-b-box="skipbox"]', sc).hidden = unlocked;
+        const saved = backupSaved();
+        box(sc, 'needBackup', !saved);
+        box(sc, 'haveBackup', saved);
+        // 「更新」只在沒有可下載韌體時停用；「還原」「刷入自己的韌體」一律可用（備份不是條件）
+        const card = tr('fnUpdate');
+        const fwOk = S.releaseList.length > 0;
+        $('[data-role="nofw"]', card).hidden = fwOk;
+        $('button[data-act]', card).disabled = !fwOk;
+        card.classList.toggle('locked', !fwOk);
+        card.setAttribute('aria-disabled', String(!fwOk));
+        box(card, 'fwVersion', fwOk);
+        box(card, 'fwCount', S.releaseList.length > 1);
+        if (fwOk) bind(card, { latestVer: displayVersion(S.releaseList[0].version), fwCount: String(S.releaseList.length) });
         break;
       }
       case 'id-error': {
@@ -420,7 +471,17 @@ export function startApp(opts = {}) {
       }
       case 'backup-done': refreshBackupDone(sc); break;
       case 'update-confirm': {
-        bind(sc, { chip: dev.chip, mac: macDisplay(dev.mac), ver: ver(), verDate: S.release && S.release.date ? `(${S.release.date})` : '', fwFile: S.release ? S.release.file.split('/').pop() : '' });
+        const r = S.release;
+        const date = releaseDate(r);
+        bind(sc, {
+          chip: dev.chip, mac: macDisplay(dev.mac), verText: verText(), verDate: date ? `(${date})` : '',
+          verNotes: releaseNotes(r, S.lang) || '—', fwFile: r ? r.file.split('/').pop() : '', fwSize: r ? formatSize(r.size) : '',
+        });
+        const idx = S.releaseList.indexOf(r);
+        box(sc, 'verPick', S.releaseList.length > 1);
+        box(sc, 'olderNote', idx > 0);
+        const sel = tr('fwVer');
+        if (sel && idx >= 0) sel.value = String(idx);
         sc.querySelector('[data-b-html="bkState"]').innerHTML = bkStateHtml();
         box(sc, 'keepList', !S.erase); box(sc, 'eraseList', S.erase);
         $('[data-act="to-op-confirm"]', sc).disabled = !tr('reqUpd').checked;
@@ -428,16 +489,78 @@ export function startApp(opts = {}) {
       }
       case 'op-confirm': refreshOpConfirm(sc); break;
       case 'restore-confirm': refreshRestoreConfirm(sc); break;
+      case 'custom-confirm': refreshCustomConfirm(sc); break;
       default: break;
     }
+    fillMapSlot(sc, 'update', S.erase ? 'erase' : 'update');
+    fillMapSlot(sc, 'restore', 'restore');
+    fillMapSlot(sc, 'custom', S.erase ? 'erase' : 'update');
+    renderRail();
+  }
+
+  function fillMapSlot(root, name, mode, pct = null) {
+    const slot = root && $(`[data-role="map-slot"][data-map="${name}"]`, root);
+    if (slot) slot.innerHTML = fmapHtml(mode, pct);
+  }
+  function runMapMode() {
+    const op = S.run && S.run.op;
+    if (op === 'backup') return 'read';
+    if (op === 'restore') return 'restore';
+    return S.erase ? 'erase' : 'update';
+  }
+
+  /** 設備狀態儀表（純呈現；資料全部來自 S）。手機／平板在頂端一條，桌機在左欄。 */
+  function renderRail() {
+    const rail = tr('rail');
+    const shell = tr('shell');
+    if (!rail || !shell) return;
+    const show = !S.termsOpen && S.screen && S.screen !== 'unsupported';
+    rail.hidden = !show;
+    shell.classList.toggle('hasrail', !!show);
+    if (!show) return;
+    const dev = S.device;
+    const bad = !!dev && S.screen === 'id-error';
+    const ok = !!dev && !bad;
+    const link = bad ? ['bad', L('不支援的設備', 'Unsupported device')] : ok ? ['ok', L('已連線 · 已辨識', 'Connected · identified')] : ['', L('未連線', 'Not connected')];
+    const mb = dev && dev.flashSizeBytes ? Math.round(dev.flashSizeBytes / 1048576) : null;
+    const yes = (good) => (good ? ' <span class="ok">✓</span>' : ' <span class="no">✗</span>');
+    let bk = `<span class="v info">${L('尚未備份（建議先備份）', 'No backup yet (recommended)')}</span>`;
+    if (backupSaved()) bk = `<span class="v good">${L('已存檔', 'Saved')}</span>`;
+    else if (S.backup && S.backup.saved) bk = `<span class="v warn">${L('已下載，待你確認', 'Downloaded, please confirm')}</span>`;
+    else if (S.backup) bk = `<span class="v warn">${L('已讀取，待存檔', 'Read, not saved yet')}</span>`;
+    const customCtx = (S.screen || '').startsWith('custom') || (S.run && S.run.op === 'custom' && ['running', 'success', 'failure'].includes(S.screen));
+    const fw = customCtx ? L('自己的檔案', 'Your own file') : S.release ? esc(verText()) : '—';
+    const running = S.screen === 'running';
+    rail.innerHTML = `<div class="link"><span class="led ${link[0]}"></span><div class="st"><b>${link[1]}</b><span>${dev ? 'USB serial' : L('接上 USB 後按「連接設備」', 'Plug in USB, then “Connect device”')}</span></div></div>`
+      + `<div class="kvi"><span class="k">${L('晶片', 'Chip')}</span><span class="v">${dev ? esc(dev.chip) + yes(!bad || dev.reason === 'wrong-flash') : '—'}</span></div>`
+      + `<div class="kvi"><span class="k">MAC</span><span class="v">${dev && dev.mac ? macHtml(dev.mac) : '—'}</span></div>`
+      + `<div class="kvi"><span class="k">Flash</span><span class="v">${mb ? `${mb} MB${yes(!bad || dev.reason !== 'wrong-flash')}` : '—'}</span></div>`
+      + `<div class="kvi"><span class="k">${L('備份', 'Backup')}</span>${ok ? bk : '<span class="v">—</span>'}</div>`
+      + (ok ? `<div class="kvi"><span class="k">${L('選定韌體', 'Firmware')}</span><span class="v">${fw}</span></div>` : '')
+      + (ok ? `<div class="mini" data-role="rail-map">${fmapHtml(running ? runMapMode() : 'idle', running ? 0 : null)}</div>` : '')
+      + (dev && !running ? `<button type="button" class="btn btn-ghost btn-sm rbtn" data-act="disconnect">${L('中斷連線', 'Disconnect')}</button>` : '');
   }
 
   function bkStateHtml() {
-    if (backupUnlocked()) {
+    if (backupSaved()) {
       const d = S.backup.result.meta.createdAt;
       return `<span class="ok">${svgIcon('check')} ${L(`已存檔（${fmtDate(d).replace(/-/g, '')}）`, `saved (${fmtDate(d).replace(/-/g, '')})`)}</span>`;
     }
-    return `<span class="no">${svgIcon('x')} ${L('沒有備份（已略過）', 'no backup (skipped)')}</span>`;
+    return `<span class="sub" data-role="no-backup">${svgIcon('info')} ${L('尚未備份（建議先備份）', 'not backed up yet (recommended)')}</span>`;
+  }
+
+  /** 更新確認畫面的版本選單：新到舊，第一項是最新。選項文字用 textContent（不經 HTML）。 */
+  function fillVersionSelect() {
+    const sel = tr('fwVer');
+    if (!sel) return;
+    sel.replaceChildren();
+    S.releaseList.forEach((r, i) => {
+      const o = doc.createElement('option');
+      o.value = String(i);
+      const date = releaseDate(r);
+      o.textContent = `${displayVersion(r.version)}${date ? ` · ${date}` : ''} · ${formatSize(r.size)}${i === 0 ? msg('（最新）', ' (latest)') : ''}`;
+      sel.appendChild(o);
+    });
   }
 
   function refreshBackupDone(sc) {
@@ -465,8 +588,8 @@ export function startApp(opts = {}) {
       savedBox.classList.toggle('warn', !confirmed);
       sc.querySelector('[data-b-html="savedTitle"]').innerHTML = confirmed ? L('備份完成，已存檔', 'Backup complete and saved') : L('備份已送出下載，還要你確認', 'Backup sent as downloads — please confirm');
       sc.querySelector('[data-b-html="savedText"]').innerHTML = b.verifiable || S.backupConfirmed
-        ? L('資料核對無誤（設備端 MD5 一致），檔案也已存到你的電腦。「更新」與「還原」已解鎖。', "The data was verified (the device's MD5 matched) and the files were saved to your computer. “Update” and “Restore” are now unlocked.")
-        : L('資料核對無誤，檔案已送出下載，但瀏覽器無法確認檔案是否存好，所以「更新」與「還原」還鎖著。', 'The data was verified and the files were sent as downloads, but the browser cannot confirm they were saved, so “Update” and “Restore” are still locked.');
+        ? L('資料核對無誤（設備端 MD5 一致），檔案也已存到你的電腦。', "The data was verified (the device's MD5 matched) and the files were saved to your computer.")
+        : L('資料核對無誤，檔案已送出下載，但瀏覽器無法確認檔案是否存好，請到「下載」資料夾確認。', 'The data was verified and the files were sent as downloads, but the browser cannot confirm they were saved; please check your Downloads folder.');
       const where = sc.querySelector('[data-b-html="savedWhere"]');
       where.hidden = false;
       where.innerHTML = b.method && b.method.bin === 'picker' && b.method.json === 'picker'
@@ -475,11 +598,10 @@ export function startApp(opts = {}) {
     } else {
       sc.querySelector('[data-b-html="savedWhere"]').hidden = true;
     }
-    const unlocked = backupUnlocked();
-    box(sc, 'next', unlocked);
-    const nofw = !S.release;
+    box(sc, 'next', saved);
+    const nofw = S.releaseList.length === 0;
     $$('[data-b-nofw="update"]', sc).forEach((btn) => { btn.disabled = nofw; });
-    box(sc, 'nofwHint', unlocked && nofw);
+    box(sc, 'nofwHint', saved && nofw);
   }
 
   // ---------- 操作層確認 ----------
@@ -494,24 +616,33 @@ export function startApp(opts = {}) {
 
   function refreshOpConfirm(sc) {
     const dev = S.device;
-    const skip = skipMode();
-    bind(sc, { ver: ver(), macHtml: macHtml(dev.mac) });
+    bind(sc, { verText: verText(), macHtml: macHtml(dev.mac) });
     sc.querySelector('[data-b-html="bkState"]').innerHTML = bkStateHtml();
     sc.querySelector('[data-b-html="opRange"]').innerHTML = S.erase
       ? `<span class="no">${L('整顆 flash 擦除後重寫（Wi-Fi 設定與校準會消失）', 'whole flash erased and rewritten (Wi-Fi settings and calibration are lost)')}</span>`
       : L('開機程式、分區表、主程式（不動設定區）', 'bootloader, partition table, application (settings area untouched)');
-    box(sc, 'skipNote', skip); box(sc, 'skipOpt', skip); box(sc, 'eraseOpt', S.erase);
+    box(sc, 'noBackupNote', !backupSaved()); box(sc, 'eraseOpt', S.erase);
     updateConfirmButton(sc, tr('opMac'), 'start-update', true);
   }
 
   function refreshRestoreConfirm(sc) {
     const r = S.restore;
-    const skip = skipMode();
     bind(sc, { macHtml: macHtml(S.device.mac), bkMac: macDisplay(r.meta.mac) });
     box(sc, 'rcDiff', r.macDiffers); box(sc, 'rcSame', !r.macDiffers); box(sc, 'rcWarns', r.macDiffers);
     box(sc, 'tailField', r.macDiffers);
-    box(sc, 'skipNote', skip); box(sc, 'skipOpt', skip);
+    box(sc, 'noBackupNote', !backupSaved());
     updateConfirmButton(sc, tr('resType'), 'start-restore', r.macDiffers);
+  }
+
+  function refreshCustomConfirm(sc) {
+    const c = S.custom;
+    bind(sc, { macHtml: macHtml(S.device.mac), cfName: safeFileLabel(c.name), cfSize: `${formatBytesWithCommas(c.size)} ${msg('位元組', 'bytes')}`, cfSha: c.sha });
+    sc.querySelector('[data-b-html="cfRange"]').innerHTML = S.erase
+      ? `<span class="no">${L('整顆 flash 擦除後重寫（Wi-Fi 設定與校準會消失）', 'whole flash erased and rewritten (Wi-Fi settings and calibration are lost)')}</span>`
+      : L(`從位址 0 寫入 ${formatBytesWithCommas(c.size)} 位元組（不動設定區）`, `${formatBytesWithCommas(c.size)} bytes from address 0 (settings area untouched)`);
+    sc.querySelector('[data-b-html="bkState"]').innerHTML = bkStateHtml();
+    box(sc, 'noBackupNote', !backupSaved()); box(sc, 'eraseOpt', S.erase);
+    updateConfirmButton(sc, tr('cfMac'), 'start-custom', true);
   }
 
   // ---------- 進行中 ----------
@@ -527,7 +658,6 @@ export function startApp(opts = {}) {
       try { S.wake.release(); } catch { /* ignore */ }
       S.wake = null;
     }
-    $$('[data-tab-btn]', toolRoot).forEach((b) => { b.disabled = on; });
   }
 
   function startRun(op) {
@@ -548,6 +678,8 @@ export function startApp(opts = {}) {
     tr('runTag').className = `tag ${c.tagCls}`;
     const bar = tr('bar');
     bar.className = `bar ${c.bar}`;
+    fillMapSlot(sc, 'run', runMapMode(), 0);
+    renderRail();
     setBar(0);
     tr('phases').innerHTML = PHASES[op].map((p, i) => `<li data-phase="${p}" class="${i === 0 ? 'act' : ''}"><span class="dot"></span>${L(...PHASE_LABELS[op][p])}</li>`).join('');
     const cancel = tr('cancelBtn');
@@ -562,6 +694,7 @@ export function startApp(opts = {}) {
     const bar = tr('bar');
     bar.setAttribute('aria-valuenow', String(pct));
     bar.firstElementChild.style.width = `${pct}%`;
+    for (const d of $$('[data-role="map-done"]', toolRoot)) d.style.width = `calc(${pct}% - 4px)`;
   }
   function logLine(text) {
     const d = new Date(now());
@@ -623,7 +756,7 @@ export function startApp(opts = {}) {
     if (f) { try { await f.disconnect(); } catch { /* ignore */ } }
   }
   function resetSession() {
-    S.device = null; S.backup = null; S.backupConfirmed = false; S.skipChecked = false; S.erase = false; S.restore = null; S.lastError = null;
+    S.device = null; S.backup = null; S.backupConfirmed = false; S.erase = false; S.restore = null; S.custom = null; S.lastError = null;
   }
 
   function showIdleError(e) {
@@ -691,12 +824,12 @@ export function startApp(opts = {}) {
         focusHeading(sc);
       } else {
         const fe = new FlasherError(s.code || 'save-failed', { reason: s.reason });
-        bind(sc, { saveErrorTitle: msg('沒有存檔，更新與還原維持鎖定', 'Not saved — update and restore stay locked'), saveErrorText: errText(fe) });
+        bind(sc, { saveErrorTitle: msg('沒有存檔', 'Not saved'), saveErrorText: errText(fe) });
         box(sc, 'saveError', true);
       }
     } catch (e) {
       const fe = toFlasherLike(e, 'save-failed');
-      bind(sc, { saveErrorTitle: msg('沒有存檔，更新與還原維持鎖定', 'Not saved — update and restore stay locked'), saveErrorText: errText(fe) });
+      bind(sc, { saveErrorTitle: msg('沒有存檔', 'Not saved'), saveErrorText: errText(fe) });
       box(sc, 'saveError', true);
     } finally {
       btn.disabled = false;
@@ -716,14 +849,13 @@ export function startApp(opts = {}) {
   async function doUpdate() {
     const rel = S.release;
     const erase = S.erase;
-    const skip = skipMode();
     S.lastOp = 'update';
     startRun('update');
     try {
       const data = await downloadFirmware(rel);
       logLine(`sha256 ok (${rel.version})`);
       setPhase(1);
-      const result = await S.flasher.update([{ data, address: 0 }], { eraseAll: erase, confirmedEraseAll: erase === true, skipBackup: skip, onProgress });
+      const result = await S.flasher.update([{ data, address: 0 }], { eraseAll: erase, confirmedEraseAll: erase === true, onProgress });
       setBusy(false);
       success(result, 'update', erase);
     } catch (e) {
@@ -734,11 +866,10 @@ export function startApp(opts = {}) {
 
   async function doRestore() {
     const r = S.restore;
-    const skip = skipMode();
     S.lastOp = 'restore';
     startRun('restore');
     try {
-      const result = await S.flasher.restore(r.bin, { meta: r.metaText, confirmedDifferentMac: r.macDiffers, skipBackup: skip, onProgress });
+      const result = await S.flasher.restore(r.bin, { meta: r.metaText, confirmedDifferentMac: r.macDiffers, onProgress });
       setBusy(false);
       success(result, 'restore', false);
     } catch (e) {
@@ -747,19 +878,42 @@ export function startApp(opts = {}) {
     }
   }
 
+  /** 刷入使用者自己的韌體：與「更新」同一條引擎路徑（受保護區避開、逐段 MD5 驗證；引擎會再檢查標頭、晶片 ID、分區表）。 */
+  async function doCustom() {
+    const c = S.custom;
+    const erase = S.erase;
+    S.lastOp = 'custom';
+    startRun('custom');
+    try {
+      logLine(`own firmware sha256 ${c.sha.slice(0, 16)}…`);
+      const result = await S.flasher.update([{ data: c.bin, address: 0 }], { eraseAll: erase, confirmedEraseAll: erase === true, onProgress });
+      setBusy(false);
+      success(result, 'custom', erase);
+    } catch (e) {
+      setBusy(false);
+      fail(e, 'custom');
+    }
+  }
+
   function success(result, op, erased) {
     S.flasher = null; // 引擎在寫入後已結束連線
     S.lastError = null;
     setScreen('success');
     const sc = $('[data-screen="success"]', toolRoot);
-    const title = op === 'update' ? L(`完成！已更新到 v${ver()}，設備已重新啟動`, `Done! Updated to v${ver()} and the device has restarted`) : L('完成！備份已還原，設備已重新啟動', 'Done! The backup was restored and the device has restarted');
+    const v = verText();
+    const titles = {
+      update: [L(`完成！已更新到 ${v}，設備已重新啟動`, `Done! Updated to ${v} and the device has restarted`), L('完成！韌體已更新', 'Done! The firmware was updated')],
+      custom: [L('完成！已刷入你的韌體，設備已重新啟動', 'Done! Your firmware was flashed and the device has restarted'), L('完成！已刷入你的韌體', 'Done! Your firmware was flashed')],
+      restore: [L('完成！備份已還原，設備已重新啟動', 'Done! The backup was restored and the device has restarted'), L('完成！備份已還原', 'Done! The backup was restored')],
+    };
+    const [title, titleNoReset] = titles[op] || titles.restore;
     bind(sc, {
-      okTitle: result.reset === 'failed' ? (op === 'update' ? L('完成！韌體已更新', 'Done! The firmware was updated') : L('完成！備份已還原', 'Done! The backup was restored')) : title,
+      okTitle: result.reset === 'failed' ? titleNoReset : title,
       okVerify: op === 'restore' ? L('整顆 flash MD5 驗證通過', 'Full-flash MD5 verified') : L('寫入的每一段 MD5 驗證通過', 'MD5 verified for every written segment'),
     });
     box(sc, 'resetFailed', result.reset === 'failed');
     box(sc, 'okRestarted', result.reset !== 'failed');
-    box(sc, 'okKept', op === 'update' && !erased && Array.isArray(result.protectedRegions) && result.protectedRegions.length > 0);
+    box(sc, 'okKept', (op === 'update' || op === 'custom') && !erased && Array.isArray(result.protectedRegions) && result.protectedRegions.length > 0);
     box(sc, 'afterErase', erased);
   }
 
@@ -769,12 +923,12 @@ export function startApp(opts = {}) {
     setScreen('failure');
     const sc = $('[data-screen="failure"]', toolRoot);
     const partial = fe.partialWrite === true;
-    const titles = { backup: ['備份沒有完成', 'Backup did not finish'], update: ['更新沒有完成', 'Update did not finish'], restore: ['還原沒有完成', 'Restore did not finish'] };
+    const titles = { backup: ['備份沒有完成', 'Backup did not finish'], update: ['更新沒有完成', 'Update did not finish'], custom: ['刷入沒有完成', 'Flashing did not finish'], restore: ['還原沒有完成', 'Restore did not finish'] };
     const [tz, te] = titles[op] || ['操作沒有完成', 'The operation did not finish'];
     const reason = fe.details && fe.details.reason ? ` · ${fe.details.reason}` : '';
     bind(sc, { failTitle: partial ? L(`${tz}：寫入到一半中斷了`, `${te}: writing was interrupted`) : L(tz, te), failCode: `${fe.code}${reason}`, failText: esc(errText(fe)) });
     box(sc, 'failPartial', partial);
-    box(sc, 'failClean', !partial && (op === 'update' || op === 'restore'));
+    box(sc, 'failClean', !partial && (op === 'update' || op === 'restore' || op === 'custom'));
     box(sc, 'rescue', partial);
   }
 
@@ -823,6 +977,49 @@ export function startApp(opts = {}) {
     next.disabled = !r.ok;
   }
 
+  // ---------- 自訂韌體選檔 ----------
+  const HEAD_BYTES = 0x8002; // 開頭到分區表魔數為止
+  async function readCustomFile(file) {
+    const c = { name: file.name, size: file.size, bin: null, sha: '', ok: false, kind: 'unknown' };
+    S.custom = c;
+    const sc = $('[data-screen="custom-pick"]', toolRoot);
+    const next = $('[data-act="to-custom-confirm"]', sc);
+    next.disabled = true;
+    bind(sc, { fwPickName: safeFileLabel(file.name) });
+    sc.querySelector('[data-b-html="fwPickInfo"]').innerHTML = `.bin · ${formatBytesWithCommas(file.size)} ${L('位元組', 'bytes')}`;
+    let head;
+    try {
+      // 檔案只在本機讀取；超過上限的不整個讀進來（只讀開頭給檢查用，反正會因大小不符被拒）
+      if (file.size <= MAX_BIN) {
+        c.bin = new Uint8Array(await file.arrayBuffer());
+        head = c.bin.subarray(0, HEAD_BYTES);
+        c.sha = bytesToHex(new Uint8Array(await subtle.digest('SHA-256', c.bin)));
+      } else {
+        head = new Uint8Array(await file.slice(0, HEAD_BYTES).arrayBuffer());
+      }
+    } catch {
+      head = null;
+    }
+    if (S.custom !== c) return; // 讀取期間又選了別的檔
+    const profile = PROFILES[S.device.profile] || PROFILES.presence;
+    const chk = customFirmwareChecks({ binLength: file.size, head, sha256: c.sha, device: S.device, imageChipId: profile.imageChipId, bootMagic: profile.bootMagic });
+    c.kind = chk.kind;
+    c.ok = !chk.hardFail && !!c.bin && c.sha !== '';
+    sc.querySelector('[data-b-html="fwChecksHtml"]').innerHTML = chk.items.map((it) =>
+      `<li class="${it.level === 'info' ? 'ok' : it.level}" data-check="${esc(it.id)}">${svgIcon(CHECK_ICON[it.level])}<div>${fwCheckLine(it, S.device)}</div></li>`).join('');
+    box(sc, 'fwChecks', true);
+    box(sc, 'fwBad', !c.ok);
+    box(sc, 'fwOtaNote', chk.kind === 'app-only' && chk.items.some((i) => i.id === 'size' && i.level === 'ok')); // 大小不符的檔不必猜它是哪一型
+    next.disabled = !c.ok;
+  }
+  function resetCustomPick() {
+    const sc = $('[data-screen="custom-pick"]', toolRoot);
+    bind(sc, { fwPickName: '—' });
+    sc.querySelector('[data-b-html="fwPickInfo"]').innerHTML = '.bin';
+    box(sc, 'fwChecks', false);
+    $('[data-act="to-custom-confirm"]', sc).disabled = true;
+  }
+
   // ---------- 事件 ----------
   async function copyText(text, el) {
     try { await win.navigator.clipboard.writeText(text); if (el) { el.hidden = false; el.textContent = msg('已複製', 'Copied'); } return true; } catch {
@@ -843,7 +1040,6 @@ export function startApp(opts = {}) {
   async function onAct(name, el) {
     switch (name) {
       case 'copy-url': await copyText(win.location.href.split('#')[0], $('[data-b="copyDone"]', el.closest('.card'))); break;
-      case 'goto-s31': S.tab = 's31'; render(); break;
       case 'connect': await doConnect(); break;
       case 'reconnect': await quietDisconnect(); resetSession(); await doConnect(); break;
       case 'disconnect': await quietDisconnect(); resetSession(); setScreen('idle'); break;
@@ -854,8 +1050,10 @@ export function startApp(opts = {}) {
       case 'discard-backup': S.backup = null; S.backupConfirmed = false; setScreen('identified'); break;
       case 'finish-backup': await quietDisconnect(); resetSession(); setScreen('idle'); break;
       case 'update':
-        if (!S.release || !(backupUnlocked() || skipMode())) break;
-        S.returnTo = S.screen; S.erase = false; setScreen('update-confirm');
+        if (S.releaseList.length === 0) break;
+        S.returnTo = S.screen; S.erase = false; S.release = S.releaseList[0]; // 每次進來都預設最新版
+        fillVersionSelect();
+        setScreen('update-confirm');
         tr('eraseAll').checked = false; tr('reqUpd').checked = false; refreshScreen();
         break;
       case 'back-main': setScreen(S.returnTo === 'backup-done' && S.backup ? 'backup-done' : 'identified'); break;
@@ -863,7 +1061,6 @@ export function startApp(opts = {}) {
       case 'back-update-confirm': setScreen('update-confirm'); break;
       case 'start-update': await doUpdate(); break;
       case 'restore':
-        if (!(backupUnlocked() || skipMode())) break;
         S.returnTo = S.screen; S.restore = null; setScreen('restore-pick');
         tr('fileBin').value = ''; tr('fileJson').value = '';
         evaluateRestore0();
@@ -873,6 +1070,18 @@ export function startApp(opts = {}) {
       case 'to-restore-confirm': setScreen('restore-confirm'); for (const c of $$('.req', $('[data-screen="restore-confirm"]', toolRoot))) c.checked = false; tr('resType').value = ''; refreshScreen(); break;
       case 'back-restore-pick': setScreen('restore-pick'); break;
       case 'start-restore': await doRestore(); break;
+      case 'custom':
+        S.returnTo = S.screen; S.custom = null; S.erase = false; setScreen('custom-pick');
+        tr('fileFw').value = ''; tr('customEraseAll').checked = false;
+        resetCustomPick();
+        break;
+      case 'pick-fw': tr('fileFw').click(); break;
+      case 'to-custom-confirm':
+        if (!S.custom || !S.custom.ok) break;
+        setScreen('custom-confirm'); for (const c of $$('.req', $('[data-screen="custom-confirm"]', toolRoot))) c.checked = false; tr('cfMac').value = ''; refreshScreen();
+        break;
+      case 'back-custom-pick': setScreen('custom-pick'); break;
+      case 'start-custom': await doCustom(); break;
       case 'finish': resetSession(); setScreen('idle'); break;
       case 'copy-report': await copyText(buildErrorReport({ error: S.lastError, engineVersion: ENGINE_VERSION, termsVersion: CURRENT_TERMS_VERSION, stage: S.lastOp, nowIso: new Date(now()).toISOString() }), $('[data-b="copyDone"]', el.closest('.card'))); break;
       case 'copy-sha': await copyText(S.backup ? S.backup.result.sha256 : '', null); break;
@@ -895,6 +1104,13 @@ export function startApp(opts = {}) {
   doc.addEventListener('click', (ev) => {
     const el = ev.target.closest && ev.target.closest('[data-act]');
     if (el && !el.disabled) { ev.preventDefault(); onAct(el.dataset.act, el).catch((e) => { console.error(e); }); return; }
+    const tb = ev.target.closest && ev.target.closest('#themeBtn');
+    if (tb) {
+      theme = theme === 'light' ? 'dark' : 'light';
+      applyTheme(theme);
+      try { if (storage) storage.setItem(THEME_KEY, theme); } catch { /* 存不進去也沒關係 */ }
+      return;
+    }
     const lb = ev.target.closest && ev.target.closest('.langsw button');
     if (lb) {
       S.lang = lb.dataset.lang === 'en' ? 'en' : 'zh';
@@ -902,27 +1118,25 @@ export function startApp(opts = {}) {
       if (S.consent) { S.consent = { ...S.consent, lang: S.lang }; store.write(S.consent); }
       return;
     }
-    const tb = ev.target.closest && ev.target.closest('[data-tab-btn]');
-    if (tb && !S.busy) { S.tab = tb.dataset.tabBtn; S.termsOpen = false; render(); }
   });
   doc.addEventListener('change', (ev) => {
     const t = ev.target;
     if (!t || !t.id && !t.classList) return;
-    if (t.id === 'skipBk') { S.skipChecked = t.checked; refreshScreen(); }
-    else if (t.id === 'eraseAll') { S.erase = t.checked; refreshScreen(); }
+    if (t.id === 'fwVer') { const r = S.releaseList[Number(t.value)]; if (r) { S.release = r; refreshScreen(); } }
+    else if (t.id === 'eraseAll' || t.id === 'customEraseAll') { S.erase = t.checked; refreshScreen(); }
     else if (t.id === 'reqUpd') { refreshScreen(); }
     else if (t.classList && t.classList.contains('req')) { refreshScreen(); }
     else if (t.id === 'fileBin' && t.files && t.files[0]) { readPickedFile('bin', t.files[0]).catch(() => {}); }
     else if (t.id === 'fileJson' && t.files && t.files[0]) { readPickedFile('json', t.files[0]).catch(() => {}); }
+    else if (t.id === 'fileFw' && t.files && t.files[0]) { readCustomFile(t.files[0]).catch(() => {}); }
   });
   doc.addEventListener('input', (ev) => {
-    if (ev.target && (ev.target.id === 'opMac' || ev.target.id === 'resType')) refreshScreen();
+    if (ev.target && (ev.target.id === 'opMac' || ev.target.id === 'resType' || ev.target.id === 'cfMac')) refreshScreen();
   });
   win.addEventListener('hashchange', () => {
     const route = resolveRoute({ hash: win.location.hash, consented: !!S.consent, declined: S.declined });
     if (route.view !== 'tool') return; // 未同意：維持閘門，不論 hash
     if (S.busy) return;
-    S.tab = route.target === 's31' ? 's31' : 'sensor';
     S.termsOpen = route.target === 'terms';
     render();
   });

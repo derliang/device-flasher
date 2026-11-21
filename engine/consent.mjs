@@ -1,7 +1,7 @@
 // 免責聲明同意的「技術強制」。
 // 單一來源：條款版本更新時只改這個常數（以及網頁上的條款文字），引擎就會拒絕舊版同意。
 
-export const CURRENT_TERMS_VERSION = 'v0.1';
+export const CURRENT_TERMS_VERSION = 'v0.3';
 
 /**
  * 檢查同意物件 `{termsVersion, acceptedAt}`。

@@ -1,6 +1,7 @@
 // 使用條款與免責聲明內容（中英）。網頁（閘門與條款頁）與 TERMS.md／DISCLAIMER.md 都從這一份產生，
 // 避免兩邊文字不一致。條款版本以引擎的 CURRENT_TERMS_VERSION 為唯一來源（這裡不另寫死）。
 // 內文只用 <b>…</b> 一種標記；渲染時用 innerHTML（內容是這個檔案的靜態字串，不含使用者輸入）。
+// v0.3：備份改為建議（不再是寫入條件）、新增「自行提供的韌體」條款。
 
 export const TERMS_TITLE = { zh: '使用條款與免責聲明', en: 'Terms of use and disclaimer' };
 
@@ -17,17 +18,25 @@ export const TERMS_CLAUSES = [
     id: 'risks',
     title: { zh: '風險告知', en: 'Risks' },
     body: {
-      // 與第一版實際提供的內容一致：公開頁沒有 S31 教學，S31 韌體尚未開放，所以不寫「提供 OTA 更新教學」。
-      zh: '刷寫、更新、還原韌體本質上有風險，可能造成：設備無法開機（變磚）、設定與資料遺失、失去原廠保固或售後服務、功能異常或誤動作、Wi-Fi 或本地網路安全性改變、與其他裝置整合失效；操作中斷電、拔線、關閉頁面、更換傳輸線、瀏覽器或作業系統問題都可能放大風險。<b>S31 智慧插座含市電電路</b>：本服務<b>不建議也不提供拆殼或接線說明</b>，且 S31 韌體目前尚未開放；任何自行拆殼或接線行為造成的觸電、火災、人身傷害與財產損失，由你自行承擔。',
-      en: 'Flashing, updating and restoring firmware is inherently risky and may cause: a device that will not boot (“bricked”), loss of settings and data, loss of the manufacturer\'s warranty or after-sales service, malfunction or unintended behaviour, changes to Wi-Fi or local-network security, and broken integration with other devices. Power loss, unplugging, closing the page, changing cables, and browser or operating-system problems during an operation can make these risks worse. <b>The S31 smart plug contains mains-voltage circuitry</b>: this Service <b>neither recommends nor provides instructions for opening the case or wiring</b>, and S31 firmware is not released yet; any electric shock, fire, injury or property damage caused by opening or wiring it yourself is your own responsibility.',
+      // 與實際提供的內容一致：公開頁只提供人體感應器的 USB 備份、更新、還原，不寫「提供 OTA 更新教學」，也不提其他設備。
+      zh: '刷寫、更新、還原韌體本質上有風險，可能造成：設備無法開機（變磚）、設定與資料遺失、失去原廠保固或售後服務、功能異常或誤動作、Wi-Fi 或本地網路安全性改變、與其他裝置整合失效；刷入不是本服務提供的韌體（你自己選擇的韌體檔），還可能因內容不相容、有瑕疵或惡意而造成上述任何後果；操作中斷電、拔線、關閉頁面、更換傳輸線、瀏覽器或作業系統問題都可能放大風險。',
+      en: 'Flashing, updating and restoring firmware is inherently risky and may cause: a device that will not boot (“bricked”), loss of settings and data, loss of the manufacturer\'s warranty or after-sales service, malfunction or unintended behaviour, changes to Wi-Fi or local-network security, and broken integration with other devices. Flashing firmware that is not provided by the Service (a firmware file you choose yourself) may additionally cause any of these consequences because its contents are incompatible, defective or malicious. Power loss, unplugging, closing the page, changing cables, and browser or operating-system problems during an operation can make these risks worse.',
     },
   },
   {
     id: 'responsibilities',
     title: { zh: '你的責任', en: 'Your responsibilities' },
     body: {
-      zh: '你確認設備型號與本服務支援的型號相符；你自行備份並確認備份可用；你自行判斷是否適合更新；你遵守適用法令與設備原廠條款；你保管好備份檔（內含 Wi-Fi 密碼與金鑰，不得公開或交給他人）。',
-      en: 'You confirm that your device model matches a model supported by this Service; you make your own backup and check that it is usable; you decide for yourself whether an update is appropriate; you comply with applicable laws and the manufacturer\'s terms; and you keep your backup files safe (they contain Wi-Fi passwords and keys and must not be made public or given to others).',
+      zh: '你確認設備型號與本服務支援的型號相符；本服務<b>建議</b>你在寫入前自行備份並確認備份可用，但備份不是使用本服務的必要條件，你選擇不備份而寫入，因此無法回復的資料或設定遺失由你自行承擔；你自行判斷是否適合更新、還原或刷入韌體；你遵守適用法令與設備原廠條款；你保管好備份檔（內含 Wi-Fi 密碼與金鑰，不得公開或交給他人）。',
+      en: 'You confirm that your device model matches a model supported by this Service; the Service <b>recommends</b> that you make your own backup before writing and check that it is usable, but a backup is not required to use the Service, and if you choose to write without one, any data or settings that cannot be recovered as a result are your own responsibility; you decide for yourself whether an update, restore or firmware flash is appropriate; you comply with applicable laws and the manufacturer\'s terms; and you keep your backup files safe (they contain Wi-Fi passwords and keys and must not be made public or given to others).',
+    },
+  },
+  {
+    id: 'own-firmware',
+    title: { zh: '自行提供的韌體', en: 'Firmware you provide yourself' },
+    body: {
+      zh: '本服務允許你選擇自己的韌體檔刷入設備。<b>該檔案不是本服務提供</b>，提供者不檢查、不審查其內容、來源、授權或安全性；本服務只做格式檢查（大小、開機標頭、晶片、分區表），通過檢查不代表該韌體適用於你的設備或安全。你確認你有權使用該韌體，並<b>自行承擔刷入的一切後果</b>；本條款的責任限制與補償條款同樣適用。檔案只在你的瀏覽器本機處理，不上傳。',
+      en: 'The Service lets you choose your own firmware file and flash it to your device. <b>That file is not provided by the Service</b>; the provider does not check or review its contents, origin, licence or safety. The Service only checks its format (size, boot header, chip, partition table), and passing these checks does not mean the firmware is suitable for your device or safe. You confirm that you are entitled to use that firmware and <b>bear all consequences of flashing it</b>; the limitation of liability and indemnity clauses of these terms apply as well. The file is processed locally in your browser and is not uploaded.',
     },
   },
   {
@@ -58,8 +67,8 @@ export const TERMS_CLAUSES = [
     id: 'privacy',
     title: { zh: '隱私', en: 'Privacy' },
     body: {
-      zh: '操作全部在你的瀏覽器本機執行，備份與韌體檔不上傳；本服務不收集個人資料；瀏覽器本機只保存同意紀錄。',
-      en: 'All operations run locally in your browser; backups and firmware files are not uploaded; the Service does not collect personal data; your browser stores only your consent record locally.',
+      zh: '操作全部在你的瀏覽器本機執行，備份與韌體檔（包括你自己選擇的韌體檔）不上傳；本服務不收集個人資料；瀏覽器本機只保存同意紀錄。',
+      en: 'All operations run locally in your browser; backups and firmware files (including firmware files you choose yourself) are not uploaded; the Service does not collect personal data; your browser stores only your consent record locally.',
     },
   },
   {

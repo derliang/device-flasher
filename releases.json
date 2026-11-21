@@ -1,35 +1,34 @@
 [
   {
     "device": "presence",
-    "version": "3.0",
+    "version": "2026.11.21",
     "kind": "factory",
-    "file": null,
-    "size": null,
-    "sha256": null,
-    "available": false,
-    "source_sha256": "12710bbcb5db3c482bea8dae7d7a7064347a9618ef939f5540347583c9a75bb9",
-    "terms_version": "v0.1"
+    "file": "firmware/presence-2026.11.21.factory.bin",
+    "size": 1316512,
+    "sha256": "c349e8feb469c4e1801fd6ca9fc5b751582474ad00103acf983955162d253eef",
+    "available": true,
+    "date": "2026-11-21",
+    "notes": {
+      "zh": "首次公開版本：人體感應器（ESP32-C3）通用韌體。Wi-Fi 設定預設留空，首次啟動後用配網方式設定。韌體以 GPL-3.0 開源，對應原始碼放在本專案的 esphome/ 資料夾。刷入前請先備份原廠韌體。",
+      "en": "First public release: general-purpose firmware for the presence sensor (ESP32-C3). Wi-Fi credentials are empty by default; set them up through provisioning after the first boot. The firmware is open source under GPL-3.0, and the matching source code is in the esphome/ folder of this project. Please back up the original firmware before flashing."
+    },
+    "source_sha256": "3f02105c41fc0168f712324b3d3afd27a14060c6d9c610f556eaad49959aa0df",
+    "terms_version": "v0.3"
   },
   {
     "device": "presence",
-    "version": "3.0",
+    "version": "2026.11.21",
     "kind": "ota",
-    "file": null,
-    "size": null,
-    "sha256": null,
-    "available": false,
-    "source_sha256": "12710bbcb5db3c482bea8dae7d7a7064347a9618ef939f5540347583c9a75bb9",
-    "terms_version": "v0.1"
-  },
-  {
-    "device": "s31",
-    "version": null,
-    "kind": "ota",
-    "file": null,
-    "size": null,
-    "sha256": null,
-    "available": false,
-    "source_sha256": "12710bbcb5db3c482bea8dae7d7a7064347a9618ef939f5540347583c9a75bb9",
-    "terms_version": "v0.1"
+    "file": "firmware/presence-2026.11.21.ota.bin",
+    "size": 1250976,
+    "sha256": "8c849966105f5cdaf5d6151c5764822113a0c3c2685406c2ff8da371881157b2",
+    "available": true,
+    "date": "2026-11-21",
+    "notes": {
+      "zh": "首次公開版本：人體感應器（ESP32-C3）通用韌體。Wi-Fi 設定預設留空，首次啟動後用配網方式設定。韌體以 GPL-3.0 開源，對應原始碼放在本專案的 esphome/ 資料夾。刷入前請先備份原廠韌體。",
+      "en": "First public release: general-purpose firmware for the presence sensor (ESP32-C3). Wi-Fi credentials are empty by default; set them up through provisioning after the first boot. The firmware is open source under GPL-3.0, and the matching source code is in the esphome/ folder of this project. Please back up the original firmware before flashing."
+    },
+    "source_sha256": "3f02105c41fc0168f712324b3d3afd27a14060c6d9c610f556eaad49959aa0df",
+    "terms_version": "v0.3"
   }
 ]

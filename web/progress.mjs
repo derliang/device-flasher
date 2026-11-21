@@ -4,6 +4,7 @@
 export const PHASES = {
   backup: ['reading', 'verifying'], // 存檔在下一個畫面（需要使用者再按一次，瀏覽器才允許開存檔視窗）
   update: ['download', 'writing', 'verifying-write', 'resetting'],
+  custom: ['writing', 'verifying-write', 'resetting'], // 刷入自己的韌體：檔案已在本機讀好，沒有下載階段
   restore: ['writing', 'verifying-write', 'resetting'],
 };
 

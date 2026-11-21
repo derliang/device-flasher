@@ -39,16 +39,12 @@ export const ERROR_TABLE = {
     en: 'Reading flash failed or the data is inconsistent; the backup is invalid. Please retry.',
   },
   'save-failed': {
-    'zh-TW': '備份檔沒有成功存到電腦，不會解鎖寫入。',
-    en: 'The backup file was not saved to your computer; writing stays locked.',
+    'zh-TW': '備份檔沒有成功存到電腦，請再試一次或換個位置存。',
+    en: 'The backup file was not saved to your computer; try again or pick another location.',
   },
   'save-cancelled': {
-    'zh-TW': '已取消存檔，不會解鎖寫入。',
-    en: 'Saving was cancelled; writing stays locked.',
-  },
-  'backup-not-saved': {
-    'zh-TW': '尚未成功存下這台設備的備份，不能寫入。請先備份並存檔（或明確選擇略過備份）。',
-    en: "This device's backup has not been saved yet, so writing is blocked. Back up and save first (or explicitly skip the backup).",
+    'zh-TW': '已取消存檔，備份檔沒有存下來。',
+    en: 'Saving was cancelled; the backup files were not saved.',
   },
   'bad-backup': {
     'zh-TW': '備份檔無效（大小、開機標頭或雜湊不符，或缺少說明檔）。',
