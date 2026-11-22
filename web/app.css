@@ -314,7 +314,6 @@ footer.foot{margin-top:var(--s2);padding-top:var(--s4);border-top:1px solid var(
 .tag.off.btn-tag{margin-left:auto}
 .noscript{padding:var(--s4);border:2px solid var(--danger);border-radius:var(--r-ctl);background:var(--danger-soft)}
 .btn .spin{width:18px;height:18px;border-radius:50%;border:3px solid currentColor;border-top-color:transparent;animation:spin 1s linear infinite;flex:none}
-.mac-tail{color:var(--accent);font-weight:700;text-decoration:underline;text-underline-offset:3px}
 #gate-root,#tool-root,#panel-sensor{display:flex;flex-direction:column;gap:var(--s4)}
 #gate-root[hidden],#tool-root[hidden],#panel-sensor[hidden]{display:none}
 
@@ -391,6 +390,7 @@ footer.foot{margin-top:var(--s2);padding-top:var(--s4);border-top:1px solid var(
 [data-screen=update-confirm] .fmap .rg{font-size:10px;letter-spacing:-.03em}
 [data-screen=update-confirm] .checks li.ok{background:none;border:0;padding:4px 0;font-size:14px;line-height:1.6}
 .opt{padding:var(--s4) var(--s5)}
+.opts2 .opt[data-box=eraseOpt]{grid-column:1/-1}
 .opt .t{font-size:14px;line-height:1.6}
 .opt .t b{font-size:16px;margin-bottom:2px}
 @media (min-width:561px){
@@ -412,6 +412,10 @@ footer.foot{margin-top:var(--s2);padding-top:var(--s4);border-top:1px solid var(
   .actbar .btn,.actbar .btn:not(.btn-ghost){width:100%;min-width:0}
   .actbar>.abhint{width:100%}
 }
+
+/* 選檔頁內的最後確認區（還原、自訂韌體）：檢查通過才出現 */
+.cfm{display:grid;gap:var(--s4);border-top:1px solid var(--line);padding-top:var(--s5);margin-top:var(--s2)}
+.cfm[hidden]{display:none}
 
 /* 動態：系統要求減少動態時全部停止 */
 @keyframes spin{to{transform:rotate(360deg)}}

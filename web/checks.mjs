@@ -1,29 +1,13 @@
 // 操作層確認與還原檔案檢查的純邏輯（沒有 DOM）。
 // 這裡的檢查只用來「顯示逐項結果」；真正的把關在引擎（restore() 會重新驗證，並丟對應錯誤碼）。
 
-/** MAC 末 4 碼（十六進位、大寫），例如最後兩組是 34、56 → "3456"。MAC 格式不對回 null。 */
-export function macTail(mac) {
-  if (typeof mac !== 'string') return null;
-  const hex = mac.replace(/[:\-\s]/g, '');
-  if (!/^[0-9a-fA-F]{12}$/.test(hex)) return null;
-  return hex.slice(-4).toUpperCase();
-}
-
-/** 使用者輸入的末 4 碼是否正確（不分大小寫、忽略前後空白）。 */
-export function tailMatches(input, mac) {
-  const want = macTail(mac);
-  if (!want || typeof input !== 'string') return false;
-  return input.trim().toUpperCase() === want;
-}
-
 /**
- * 操作層確認：所有必勾項都勾了；需要輸入末 4 碼時要輸入正確。
- * @param {{checks:boolean[], needTail:boolean, tailInput:string, mac:string}} s
+ * 操作層確認：所有（目前看得到的）必勾項都勾了才能按。
+ * 2026-11-22 起不再要求輸入 MAC 末 4 碼（使用者決定：設備是自己接上電腦的，MAC 只當資訊顯示）。
+ * @param {{checks:boolean[]}} s
  */
-export function confirmReady({ checks, needTail, tailInput, mac }) {
-  if (!Array.isArray(checks) || checks.length === 0 || !checks.every((v) => v === true)) return false;
-  if (needTail && !tailMatches(tailInput, mac)) return false;
-  return true;
+export function confirmReady({ checks }) {
+  return Array.isArray(checks) && checks.length > 0 && checks.every((v) => v === true);
 }
 
 /**

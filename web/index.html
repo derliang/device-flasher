@@ -241,13 +241,13 @@
   </section>
 </section>
 
-<!-- 備份完成（先「待存檔」；存檔與否都不影響更新／還原） -->
+<!-- 備份完成（先「待存檔」；存檔與否都不影響更新／還原；下載方式無法確認時只顯示提醒，不擋任何按鈕） -->
 <section class="screen" data-screen="backup-done">
   {{STEPS 4}}
   <div class="note info big" data-box="presave">{{I info}}<div><h3 tabindex="-1">[[備份已讀完，還沒存到你的電腦||Backup read — not saved to your computer yet]]</h3>[[資料已核對無誤（設備端 MD5 一致），但<b>還沒存檔</b>。請按下面的「存檔」，選擇存放位置；沒有存下來的備份無法拿來還原。||The data was verified (the device's MD5 matched) but it is <b>not saved yet</b>. Press “Save” below and choose a location; a backup that was not saved cannot be used to restore.]]</div></div>
   <div class="note bad" data-box="saveError" hidden role="alert">{{I x}}<div><b data-b="saveErrorTitle"></b><div data-b="saveErrorText"></div></div></div>
   <div class="note ok big" data-box="saved" hidden>{{I check}}<div><h3 tabindex="-1" data-b-html="savedTitle"></h3><span data-b-html="savedText"></span></div></div>
-  <div class="note warn" data-box="unverified" hidden>{{I warn}}<div><b>[[瀏覽器無法確認檔案是否真的存好||The browser cannot confirm the files were really saved]]</b><br>[[檔案是以「下載」方式存出的，已下載到你的「下載」資料夾。請打開資料夾確認 .bin 與 .json 都在，再按下面的按鈕。||The files were saved as downloads and went to your Downloads folder. Open it, check that both the .bin and the .json are there, then press the button below.]]<div class="btns" style="margin-top:var(--s2)"><button type="button" class="btn btn-ghost btn-sm" data-act="confirm-saved">{{I check}}[[我已確認檔案已存好||I have checked the files are saved]]</button></div></div></div>
+  <div class="note warn" data-box="unverified" hidden>{{I warn}}<div><b>[[瀏覽器無法確認檔案是否真的存好||The browser cannot confirm the files were really saved]]</b><br>[[檔案是以「下載」方式存出的，已下載到你的「下載」資料夾。請確認 .bin 與 .json 都在（這只是提醒，不用按任何按鈕，可以直接繼續）。||The files were saved as downloads and went to your Downloads folder. Please check that both the .bin and the .json are there (this is only a reminder — no button to press, you can continue right away).]]</div></div>
   <section class="card">
     <h2>[[備份檔案||Backup files]]</h2>
     <div class="files">
@@ -269,10 +269,14 @@
   </section>
 </section>
 
-<!-- 更新確認 -->
+<!-- 更新確認（已合併原「最後確認」；不再輸入 MAC，設備 MAC 只當資訊顯示） -->
 <section class="screen" data-screen="update-confirm">
   {{STEPS 3}}
   <header class="confhead"><h2 tabindex="-1">[[更新韌體：確認||Update firmware: confirm]]</h2><span class="tag write">{{I pen}}[[會寫入設備||Writes to device]]</span></header>
+  <div class="note bad">{{I warn}}<div>
+    <b>[[這會覆寫設備上的韌體。||This overwrites the firmware on the device.]]</b>
+    [[寫入期間不能中斷。操作失敗或中斷，<b>可能造成設備無法使用</b>（通常還救得回來，但不保證）。||Writing cannot be interrupted. If it fails or is interrupted, <b>the device may become unusable</b> (usually it can be rescued, but this is not guaranteed).]]
+  </div></div>
   <div class="two">
     <section class="card">
       <h3 class="ch">[[這次更新||This update]]</h3>
@@ -281,10 +285,12 @@
       <dt>[[將寫入的版本||Version to install]]</dt><dd><span data-b="verText"></span> <span class="sub" data-b="verDate"></span></dd>
       <dt>[[發行說明||Release notes]]</dt><dd data-b="verNotes"></dd>
       <dt>[[檔案||File]]</dt><dd><span class="mono" data-b="fwFile"></span> · <span data-b="fwSize"></span></dd>
+      <dt>[[寫入範圍||Write range]]</dt><dd data-b-html="opRange"></dd>
       <dt>[[備份||Backup]]</dt><dd data-b-html="bkState"></dd>
     </dl>
     <div class="field" data-b-box="verPick" hidden><label for="fwVer">[[選擇版本（預設最新）||Choose a version (latest by default)]]</label><select id="fwVer" data-role="version-select"></select></div>
     <div class="note warn" data-box="olderNote" hidden>{{I warn}}<div>[[<b>這是較舊版本。</b>除非你知道為什麼需要它（例如新版有問題），請選最新版。||<b>This is an older version.</b> Unless you know why you need it (for example the newest one has a problem), choose the latest.]]</div></div>
+    <div class="note info" data-box="noBackupNote" data-role="no-backup" hidden>{{I info}}<div>[[<b>尚未備份（建議先備份）。</b>沒有備份也可以繼續；但寫壞或設定被覆蓋時，就沒有辦法回到這台原本的內容。||<b>No backup yet (backing up first is recommended).</b> You can continue without one, but if the write fails or settings are overwritten there is no way back to this device's previous contents.]]</div></div>
     </section>
     <section class="card">
     <h3 class="ch">[[寫入哪些內容||What gets written]]</h3>
@@ -302,44 +308,18 @@
     <h3 class="ch">[[開始前請確認||Before you start]]</h3>
     <div class="opts2">
     <label class="opt adv"><input type="checkbox" id="eraseAll"><span class="t"><b>[[進階：全部擦除（全新安裝）||Advanced: erase everything (clean install)]]</b>[[Wi-Fi 設定與校準會全部消失，裝好後要重新設定。一般更新請不要勾。||Wi-Fi settings and calibration are lost; you must set them up again. Leave unticked for a normal update.]]</span></label>
-    <label class="opt"><input type="checkbox" class="req" id="reqUpd"><span class="t"><b>[[我了解寫入期間不能拔線、不能關閉這一頁||I understand I must not unplug or close this page while writing]]</b>[[中斷可能讓設備暫時無法開機（通常可以救回）。||An interruption can leave the device unable to boot (usually it can be rescued).]]</span></label>
+    <label class="opt"><input type="checkbox" class="req" id="reqUpd" data-req="main"><span class="t"><b>[[我了解寫入期間不能拔線、不能關閉這一頁，且這會覆寫設備上的韌體||I understand I must not unplug or close this page while writing, and that this overwrites the firmware on the device]]</b>[[中斷可能讓設備暫時無法開機（通常可以救回）。||An interruption can leave the device unable to boot (usually it can be rescued).]]</span></label>
+    <label class="opt" data-box="eraseOpt" hidden><input type="checkbox" class="req" data-req="erase"><span class="t"><b>[[我了解整顆擦除會讓 Wi-Fi 設定與校準全部消失||I understand erasing everything removes all Wi-Fi settings and calibration]]</b></span></label>
     </div>
-    <div class="btns actbar"><span class="abhint">[[勾選上方「我了解…」後，才能按「下一步」。||Tick “I understand…” above to enable “Next”.]]</span><button type="button" class="btn btn-ghost" data-act="back-main">[[返回||Back]]</button><button type="button" class="btn btn-write" data-act="to-op-confirm" disabled>{{I pen}}[[下一步：最後確認||Next: final check]]</button></div>
+    <div class="btns actbar"><span class="abhint">[[勾選所有「我了解…」後，才能按「覆寫並開始更新」。||Tick every “I understand…” box to enable “Overwrite and start the update”.]]</span><button type="button" class="btn btn-ghost" data-act="back-main">[[返回||Back]]</button><button type="button" class="btn btn-danger" data-act="start-update" disabled>{{I warn}}[[覆寫並開始更新||Overwrite and start the update]]</button></div>
   </section>
 </section>
 
-<!-- 操作層：最後確認（更新） -->
-<section class="screen" data-screen="op-confirm">
-  {{STEPS 3}}
-  <div class="note bad big">{{I warn}}<div>
-    <h3 tabindex="-1">[[最後確認：這會覆寫設備上的韌體||Final check: this overwrites the firmware on the device]]</h3>
-    [[寫入期間不能中斷。操作失敗或中斷，<b>可能造成設備無法使用</b>（通常還救得回來，但不保證）。||Writing cannot be interrupted. If it fails or is interrupted, <b>the device may become unusable</b> (usually it can be rescued, but this is not guaranteed).]]
-  </div></div>
-  <div class="two">
-    <section class="card gated">
-    <h2 class="ch">[[更新韌體 ||Update firmware to ]]<span data-b="verText"></span></h2>
-    <dl class="kv">
-      <dt>[[設備||Device]]</dt><dd class="mono" data-b-html="macHtml"></dd>
-      <dt>[[寫入範圍||Write range]]</dt><dd data-b-html="opRange"></dd>
-      <dt>[[備份||Backup]]</dt><dd data-b-html="bkState"></dd>
-    </dl>
-    <div class="note info" data-box="noBackupNote" data-role="no-backup" hidden>{{I info}}<div>[[<b>尚未備份（建議先備份）。</b>沒有備份也可以繼續；但寫壞或設定被覆蓋時，就沒有辦法回到這台原本的內容。||<b>No backup yet (backing up first is recommended).</b> You can continue without one, but if the write fails or settings are overwritten there is no way back to this device's previous contents.]]</div></div>
-    </section>
-    <section class="card">
-      <h2 class="ch">[[需要你確認的事||What you need to confirm]]</h2>
-    <label class="opt" data-box="eraseOpt" hidden><input type="checkbox" class="req" data-req="erase"><span class="t"><b>[[我了解整顆擦除會讓 Wi-Fi 設定與校準全部消失||I understand erasing everything removes all Wi-Fi settings and calibration]]</b></span></label>
-    <label class="opt"><input type="checkbox" class="req" data-req="main"><span class="t"><b>[[我了解這個操作會覆寫設備上的韌體，可能造成設備無法使用||I understand this overwrites the firmware on the device and may make it unusable]]</b>[[寫入期間不拔線、不關閉這一頁。||I will not unplug or close this page while writing.]]</span></label>
-    <div class="field"><label for="opMac">[[請輸入設備 MAC 的最後 4 碼來確認||Type the last 4 characters of the device's MAC to confirm]]</label><input type="text" id="opMac" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="····"><span class="hint">[[提示：就是上面那組 MAC 的最後 4 碼。||Hint: the last 4 characters of the MAC shown above.]]</span></div>
-    </section>
-  </div>
-  <div class="actbar"><span class="abhint">[[勾選並輸入 MAC 後，才能按「覆寫並開始更新」。||Tick the boxes and type the MAC to enable “Overwrite and start the update”.]]</span><button type="button" class="btn btn-ghost" data-act="back-update-confirm">[[返回||Back]]</button><button type="button" class="btn btn-danger" data-act="start-update" disabled>{{I warn}}[[覆寫並開始更新||Overwrite and start the update]]</button></div>
-</section>
-
-<!-- 還原：選檔與驗證（驗證不過時同一頁顯示「檔案不適用」） -->
+<!-- 還原：選檔、驗證與最後確認（同一頁；檢查通過才出現確認區，沒過時按鈕停用並說明哪項不符） -->
 <section class="screen" data-screen="restore-pick">
   {{STEPS 3}}
   <section class="card">
-    <header style="display:flex;gap:var(--s3);align-items:center;flex-wrap:wrap"><h2 style="flex:1" tabindex="-1">[[還原備份：選擇檔案||Restore a backup: choose files]]</h2><span class="tag over">{{I warn}}[[覆寫整顆 flash||Overwrites entire flash]]</span></header>
+    <header style="display:flex;gap:var(--s3);align-items:center;flex-wrap:wrap"><h2 style="flex:1" tabindex="-1">[[還原備份：選擇檔案並確認||Restore a backup: choose files and confirm]]</h2><span class="tag over">{{I warn}}[[覆寫整顆 flash||Overwrites entire flash]]</span></header>
     <p class="hint">[[請同時選擇備份的 .bin 與 .json 兩個檔案（檔案只在你的瀏覽器裡讀取，不會上傳）。||Choose both the backup .bin and .json (files are only read inside your browser, never uploaded).]]</p>
     <div class="files">
       <div class="file"><span class="ico">{{I file}}</span><div class="nm"><span data-b="pickBinName">—</span><small data-b-html="pickBinInfo">.bin</small></div><button type="button" class="btn btn-ghost btn-sm" data-act="pick-bin">[[選擇 .bin||Choose .bin]]</button></div>
@@ -348,54 +328,46 @@
     <input type="file" id="fileBin" accept=".bin,application/octet-stream" hidden>
     <input type="file" id="fileJson" accept=".json,application/json" hidden>
     <div data-box="pickChecks" hidden>
-      <div class="note bad" data-box="pickBad" hidden role="alert">{{I x}}<div><b>[[這份備份不能用在目前的設備，已停用還原。||This backup can't be used on the connected device; restore is disabled.]]</b></div></div>
+      <div class="note bad" data-box="pickBad" hidden role="alert">{{I x}}<div><b>[[這份備份不能用在目前的設備，已停用還原。請看下面標紅的檢查項目。||This backup can't be used on the connected device; restore is disabled. See the failed check below.]]</b></div></div>
       <h3>[[檢查結果||Check results]]</h3>
       <ul class="checks" data-b-html="checksHtml"></ul>
-      <p class="hint" data-box="macHint" hidden>[[MAC 不同不是錯誤，但備份內含那台設備的 Wi-Fi 與金鑰，所以要多一道確認。||A different MAC is not an error, but the backup carries that device's Wi-Fi and keys, so it needs an extra confirmation.]]</p>
     </div>
-    <div class="btns actbar"><button type="button" class="btn btn-ghost" data-act="back-main">[[返回||Back]]</button><button type="button" class="btn btn-danger grow" data-act="to-restore-confirm" disabled>[[下一步：確認還原||Next: confirm restore]]</button></div>
+    <div class="cfm" data-box="rcBlock" hidden>
+      <div class="note bad big">{{I warn}}<div>
+        <h3>[[最後確認：這會覆蓋整顆 flash||Final check: this overwrites the entire flash]]</h3>
+        [[目前設備上的韌體、Wi-Fi 設定、校準與歷史資料會全部被這份備份取代，無法復原。寫入期間不能中斷，失敗可能造成設備無法使用（通常還救得回來，但不保證）。||Firmware, Wi-Fi settings, calibration and history on the device will all be replaced by this backup and cannot be undone. Writing cannot be interrupted, and a failure may leave the device unusable (usually it can be rescued, but this is not guaranteed).]]
+      </div></div>
+      <h3 class="ch" data-box="rcDiff" hidden>[[這份備份來自另一台設備||This backup is from a different device]]</h3>
+      <h3 class="ch" data-box="rcSame" hidden>[[這份備份來自這台設備||This backup is from this device]]</h3>
+      <dl class="kv">
+        <dt>[[備份來源 MAC||Backup MAC]]</dt><dd class="mono" data-b="bkMac"></dd>
+        <dt>[[目前設備 MAC||Connected MAC]]</dt><dd class="mono" data-b-html="macHtml"></dd>
+        <dt>[[寫入範圍||Write range]]</dt><dd>0x000000–0x3FFFFF（4 MB）</dd>
+      </dl>
+      <div data-role="map-slot" data-map="restore"></div>
+      <ul class="checks" data-box="rcWarns" hidden>
+        <li class="warn">{{I warn}}<div>[[還原後，這台會帶著<b>備份那台的 Wi-Fi 密碼與 API 金鑰</b>。||After restoring, this device carries <b>the other device's Wi-Fi password and API key</b>.]]</div></li>
+        <li class="warn">{{I warn}}<div>[[兩台若同時上線，名稱、網路位址或在智慧家庭系統裡的實體可能重複。||If both devices go online together, their names, addresses or smart-home entities may collide.]]</div></li>
+      </ul>
+      <div class="note info" data-box="noBackupNote" data-role="no-backup" hidden>{{I info}}<div>[[<b>尚未備份（建議先備份）。</b>覆寫後沒有辦法退回這台目前的內容。||<b>No backup yet (backing up first is recommended).</b> After overwriting there is no way back to this device's current contents.]]</div></div>
+      <label class="opt"><input type="checkbox" class="req" data-req="main"><span class="t"><b data-box="rcDiff" hidden>[[我確定要用另一台的備份覆蓋這台||I'm sure I want to overwrite this device with another device's backup]]</b><b data-box="rcSame" hidden>[[我確定要用這份備份覆蓋整顆 flash||I'm sure I want to overwrite the entire flash with this backup]]</b>[[寫入期間不能拔線、不能關閉這一頁。||Do not unplug or close this page while writing.]]</span></label>
+    </div>
+    <div class="btns actbar"><span class="abhint" data-b-html="confHint"></span><button type="button" class="btn btn-ghost" data-act="back-main">[[返回||Back]]</button><button type="button" class="btn btn-danger" data-act="start-restore" disabled>{{I restore}}[[覆寫並開始還原||Overwrite and start restore]]</button></div>
   </section>
 </section>
 
-<!-- 還原確認（操作層最後確認；不同台要輸入末 4 碼） -->
-<section class="screen" data-screen="restore-confirm">
-  {{STEPS 3}}
-  <div class="note bad big">{{I warn}}<div>
-    <h3 tabindex="-1">[[最後確認：這會覆蓋整顆 flash||Final check: this overwrites the entire flash]]</h3>
-    [[目前設備上的韌體、Wi-Fi 設定、校準與歷史資料會全部被這份備份取代，無法復原。寫入期間不能中斷，失敗可能造成設備無法使用（通常還救得回來，但不保證）。||Firmware, Wi-Fi settings, calibration and history on the device will all be replaced by this backup and cannot be undone. Writing cannot be interrupted, and a failure may leave the device unusable (usually it can be rescued, but this is not guaranteed).]]
-  </div></div>
-  <section class="card gated">
-    <h2 data-box="rcDiff" hidden>[[這份備份來自另一台設備||This backup is from a different device]]</h2>
-    <h2 data-box="rcSame" hidden>[[這份備份來自這台設備||This backup is from this device]]</h2>
-    <dl class="kv">
-      <dt>[[備份來源 MAC||Backup MAC]]</dt><dd class="mono" data-b="bkMac"></dd>
-      <dt>[[目前設備 MAC||Connected MAC]]</dt><dd class="mono" data-b-html="macHtml"></dd>
-      <dt>[[寫入範圍||Write range]]</dt><dd>0x000000–0x3FFFFF（4 MB）</dd>
-    </dl>
-    <div data-role="map-slot" data-map="restore"></div>
-    <ul class="checks" data-box="rcWarns" hidden>
-      <li class="warn">{{I warn}}<div>[[還原後，這台會帶著<b>備份那台的 Wi-Fi 密碼與 API 金鑰</b>。||After restoring, this device carries <b>the other device's Wi-Fi password and API key</b>.]]</div></li>
-      <li class="warn">{{I warn}}<div>[[兩台若同時上線，名稱、網路位址或在智慧家庭系統裡的實體可能重複。||If both devices go online together, their names, addresses or smart-home entities may collide.]]</div></li>
-    </ul>
-    <div class="note info" data-box="noBackupNote" data-role="no-backup" hidden>{{I info}}<div>[[<b>尚未備份（建議先備份）。</b>覆寫後沒有辦法退回這台目前的內容。||<b>No backup yet (backing up first is recommended).</b> After overwriting there is no way back to this device's current contents.]]</div></div>
-    <label class="opt"><input type="checkbox" class="req" data-req="main"><span class="t"><b data-box="rcDiff" hidden>[[我確定要用另一台的備份覆蓋這台||I'm sure I want to overwrite this device with another device's backup]]</b><b data-box="rcSame" hidden>[[我確定要用這份備份覆蓋整顆 flash||I'm sure I want to overwrite the entire flash with this backup]]</b>[[寫入期間不能拔線、不能關閉這一頁。||Do not unplug or close this page while writing.]]</span></label>
-    <div class="field" data-box="tailField" hidden><label for="resType">[[請輸入目前設備 MAC 的最後 4 碼來確認||Type the last 4 characters of the connected device's MAC to confirm]]</label><input type="text" id="resType" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="····"><span class="hint">[[提示：就是上面「目前設備 MAC」的最後 4 碼。||Hint: the last 4 characters of the “Connected MAC” above.]]</span></div>
-    <div class="btns"><button type="button" class="btn btn-ghost" data-act="back-restore-pick">[[返回||Back]]</button><button type="button" class="btn btn-danger grow" data-act="start-restore" disabled>{{I restore}}[[覆寫並開始還原||Overwrite and start restore]]</button></div>
-  </section>
-</section>
-
-<!-- 自訂韌體：選檔與本機檢查（只收完整映像；OTA 型拒絕） -->
+<!-- 自訂韌體：選檔、本機檢查與最後確認（同一頁；只收完整映像，OTA 型拒絕；檢查通過才出現確認區） -->
 <section class="screen" data-screen="custom-pick">
   {{STEPS 3}}
   <section class="card">
-    <header style="display:flex;gap:var(--s3);align-items:center;flex-wrap:wrap"><h2 style="flex:1" tabindex="-1">[[刷入自己的韌體：選擇檔案||Flash your own firmware: choose a file]]</h2><span class="tag over">{{I warn}}[[風險自負||At your own risk]]</span></header>
+    <header style="display:flex;gap:var(--s3);align-items:center;flex-wrap:wrap"><h2 style="flex:1" tabindex="-1">[[刷入自己的韌體：選擇檔案並確認||Flash your own firmware: choose a file and confirm]]</h2><span class="tag over">{{I warn}}[[風險自負||At your own risk]]</span></header>
     <p class="hint">[[請選擇從位址 0 開始的<b>完整韌體映像</b>（含開機程式與分區表，例如 ESPHome 的 <span class="mono">*.factory.bin</span>）。檔案只在你的瀏覽器裡讀取，不會上傳。||Choose a <b>complete firmware image</b> that starts at address 0 (with bootloader and partition table, for example ESPHome's <span class="mono">*.factory.bin</span>). The file is only read inside your browser and never uploaded.]]</p>
     <div class="files">
       <div class="file"><span class="ico">{{I file}}</span><div class="nm"><span data-b="fwPickName">—</span><small data-b-html="fwPickInfo">.bin</small></div><button type="button" class="btn btn-ghost btn-sm" data-act="pick-fw">[[選擇 .bin||Choose .bin]]</button></div>
     </div>
     <input type="file" id="fileFw" accept=".bin,application/octet-stream" hidden>
     <div data-box="fwChecks" hidden>
-      <div class="note bad" data-box="fwBad" hidden role="alert">{{I x}}<div><b>[[這個檔案不能刷到目前的設備，已停用寫入。||This file can't be flashed to the connected device; writing is disabled.]]</b></div></div>
+      <div class="note bad" data-box="fwBad" hidden role="alert">{{I x}}<div><b>[[這個檔案不能刷到目前的設備，已停用寫入。請看下面標紅的檢查項目。||This file can't be flashed to the connected device; writing is disabled. See the failed check below.]]</b></div></div>
       <div class="note bad" data-box="fwOtaNote" data-role="ota-rejected" hidden>{{I x}}<div>[[<b>這看起來是只有主程式的 OTA 型映像（例如 <span class="mono">*.ota.bin</span>）。</b>它沒有開機程式與分區表，從位址 0 寫入會讓設備無法開機，所以這裡不接受。請改用同一次建置產生的完整映像（ESPHome 的 <span class="mono">*.factory.bin</span>）；OTA 型請用設備自己網頁上的 OTA 更新。||<b>This looks like an app-only OTA image (for example <span class="mono">*.ota.bin</span>).</b> It has no bootloader or partition table, and writing it from address 0 would leave the device unable to boot, so it is not accepted here. Use the complete image from the same build (ESPHome's <span class="mono">*.factory.bin</span>) instead; flash OTA images through the device's own OTA web page.]]</div></div>
       <h3>[[檢查結果||Check results]]</h3>
       <ul class="checks" data-b-html="fwChecksHtml"></ul>
@@ -405,33 +377,23 @@
       <li class="warn">{{I warn}}<div>[[刷入不相容的韌體可能讓設備無法使用或失去功能；請只刷你信任、確定是給這種設備的檔案。||Flashing incompatible firmware may make the device unusable or lose features; only flash files you trust and know are meant for this device.]]</div></li>
     </ul>
     <label class="opt adv"><input type="checkbox" id="customEraseAll"><span class="t"><b>[[進階：全部擦除（全新安裝）||Advanced: erase everything (clean install)]]</b>[[Wi-Fi 設定與校準會全部消失。只有新韌體的設定區和原本的不相容時才需要。||Wi-Fi settings and calibration are lost. Only needed when the new firmware's settings area is incompatible with the current one.]]</span></label>
-    <div class="btns actbar"><button type="button" class="btn btn-ghost" data-act="back-main">[[返回||Back]]</button><button type="button" class="btn btn-danger grow" data-act="to-custom-confirm" disabled>[[下一步：最後確認||Next: final check]]</button></div>
-  </section>
-</section>
-
-<!-- 自訂韌體：最後確認（比照還原：必勾＋輸入 MAC 末 4 碼） -->
-<section class="screen" data-screen="custom-confirm">
-  {{STEPS 3}}
-  <div class="note bad big">{{I warn}}<div>
-    <h3 tabindex="-1">[[最後確認：這會用你自己的韌體覆寫設備||Final check: this overwrites the device with your own firmware]]</h3>
-    [[這個韌體不是本服務提供的，後果由你自行承擔。寫入期間不能中斷；失敗或韌體不相容，<b>可能造成設備無法使用</b>（通常還救得回來，但不保證）。||This firmware is not provided by this Service and you bear the consequences. Writing cannot be interrupted; if it fails or the firmware is incompatible, <b>the device may become unusable</b> (usually it can be rescued, but this is not guaranteed).]]
-  </div></div>
-  <section class="card gated">
-    <h2>[[刷入自己的韌體||Flash your own firmware]]</h2>
-    <dl class="kv">
-      <dt>[[設備||Device]]</dt><dd class="mono" data-b-html="macHtml"></dd>
-      <dt>[[檔案||File]]</dt><dd><span class="mono" data-b="cfName"></span> · <span data-b="cfSize"></span></dd>
-      <dt>SHA-256</dt><dd class="mono" data-b="cfSha"></dd>
-      <dt>[[寫入範圍||Write range]]</dt><dd data-b-html="cfRange"></dd>
-      <dt>[[備份||Backup]]</dt><dd data-b-html="bkState"></dd>
-    </dl>
-    <div data-role="map-slot" data-map="custom"></div>
-    <div class="note info" data-box="noBackupNote" data-role="no-backup" hidden>{{I info}}<div>[[<b>尚未備份（建議先備份）。</b>沒有備份也可以繼續；但韌體不合用時，就沒有辦法回到這台原本的內容。||<b>No backup yet (backing up first is recommended).</b> You can continue without one, but if the firmware doesn't work there is no way back to this device's previous contents.]]</div></div>
-    <label class="opt" data-box="eraseOpt" hidden><input type="checkbox" class="req" data-req="erase"><span class="t"><b>[[我了解整顆擦除會讓 Wi-Fi 設定與校準全部消失||I understand erasing everything removes all Wi-Fi settings and calibration]]</b></span></label>
-    <label class="opt"><input type="checkbox" class="req" data-req="own-firmware"><span class="t"><b>[[我了解這個韌體不是本服務提供、內容沒有經過檢查，後果由我自行承擔||I understand this firmware is not provided by this Service, its contents are unchecked, and I bear the consequences]]</b></span></label>
-    <label class="opt"><input type="checkbox" class="req" data-req="main"><span class="t"><b>[[我了解這個操作會覆寫設備上的韌體，可能造成設備無法使用||I understand this overwrites the firmware on the device and may make it unusable]]</b>[[寫入期間不拔線、不關閉這一頁。||I will not unplug or close this page while writing.]]</span></label>
-    <div class="field"><label for="cfMac">[[請輸入設備 MAC 的最後 4 碼來確認||Type the last 4 characters of the device's MAC to confirm]]</label><input type="text" id="cfMac" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="····"><span class="hint">[[提示：就是上面那組 MAC 的最後 4 碼。||Hint: the last 4 characters of the MAC shown above.]]</span></div>
-    <div class="btns"><button type="button" class="btn btn-ghost" data-act="back-custom-pick">[[返回||Back]]</button><button type="button" class="btn btn-danger grow" data-act="start-custom" disabled>{{I warn}}[[覆寫並開始刷入||Overwrite and start flashing]]</button></div>
+    <div class="cfm" data-box="cfBlock" hidden>
+      <div class="note bad big">{{I warn}}<div>
+        <h3>[[最後確認：這會用你自己的韌體覆寫設備||Final check: this overwrites the device with your own firmware]]</h3>
+        [[這個韌體不是本服務提供的，後果由你自行承擔。寫入期間不能中斷；失敗或韌體不相容，<b>可能造成設備無法使用</b>（通常還救得回來，但不保證）。||This firmware is not provided by this Service and you bear the consequences. Writing cannot be interrupted; if it fails or the firmware is incompatible, <b>the device may become unusable</b> (usually it can be rescued, but this is not guaranteed).]]
+      </div></div>
+      <dl class="kv">
+        <dt>[[設備||Device]]</dt><dd class="mono" data-b-html="macHtml"></dd>
+        <dt>SHA-256</dt><dd class="mono" data-b="cfSha"></dd>
+        <dt>[[寫入範圍||Write range]]</dt><dd data-b-html="cfRange"></dd>
+        <dt>[[備份||Backup]]</dt><dd data-b-html="bkState"></dd>
+      </dl>
+      <div data-role="map-slot" data-map="custom"></div>
+      <div class="note info" data-box="noBackupNote" data-role="no-backup" hidden>{{I info}}<div>[[<b>尚未備份（建議先備份）。</b>沒有備份也可以繼續；但韌體不合用時，就沒有辦法回到這台原本的內容。||<b>No backup yet (backing up first is recommended).</b> You can continue without one, but if the firmware doesn't work there is no way back to this device's previous contents.]]</div></div>
+      <label class="opt" data-box="eraseOpt" hidden><input type="checkbox" class="req" data-req="erase"><span class="t"><b>[[我了解整顆擦除會讓 Wi-Fi 設定與校準全部消失||I understand erasing everything removes all Wi-Fi settings and calibration]]</b></span></label>
+      <label class="opt"><input type="checkbox" class="req" data-req="own-firmware"><span class="t"><b>[[我了解這不是官方韌體、內容沒有經過檢查，後果由我自行承擔；這個操作會覆寫設備上的韌體，可能造成設備無法使用||I understand this is not official firmware and its contents are unchecked, I bear the consequences, and this overwrites the firmware on the device and may make it unusable]]</b>[[寫入期間不拔線、不關閉這一頁。||I will not unplug or close this page while writing.]]</span></label>
+    </div>
+    <div class="btns actbar"><span class="abhint" data-b-html="confHint"></span><button type="button" class="btn btn-ghost" data-act="back-main">[[返回||Back]]</button><button type="button" class="btn btn-danger" data-act="start-custom" disabled>{{I warn}}[[覆寫並開始刷入||Overwrite and start flashing]]</button></div>
   </section>
 </section>
 

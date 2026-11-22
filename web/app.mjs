@@ -10,7 +10,7 @@ import {
   makeRecord, consentForEngine, consentRecordJson,
 } from './consent-gate.mjs';
 import { listReleases, parseReleases, resolveFileUrl, verifyDownload, bytesToHex, displayVersion, releaseNotes, releaseDate } from './releases.mjs';
-import { macTail, confirmReady, restoreChecks, customFirmwareChecks, buildErrorReport, safeFileLabel } from './checks.mjs';
+import { confirmReady, restoreChecks, customFirmwareChecks, buildErrorReport, safeFileLabel } from './checks.mjs';
 import { PHASES, phaseIndex, overallFraction, createRateTracker, formatEta, formatSpeed, formatSize, formatBytesWithCommas } from './progress.mjs';
 import { resolveRoute, serialSupported } from './route.mjs';
 import { TERMS_CLAUSES } from './terms-content.mjs';
@@ -91,12 +91,7 @@ export function fmtDateTime(iso) {
   return Number.isNaN(d.getTime()) ? '—' : `${fmtDate(iso)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 const macDisplay = (mac) => String(mac || '').toUpperCase();
-function macHtml(mac) {
-  const m = macDisplay(mac);
-  const tail = macTail(mac);
-  if (!tail || m.length < 4) return esc(m);
-  return `${esc(m.slice(0, -4))}<span class="mac-tail">${esc(m.slice(-4))}</span>`;
-}
+const macHtml = (mac) => esc(macDisplay(mac));
 
 const PHASE_LABELS = {
   backup: {
@@ -256,7 +251,7 @@ export function startApp(opts = {}) {
     consent: null, declined: false, oldConsent: null,
     screen: null, termsOpen: false,
     flasher: null, device: null, busy: false, abort: null, wake: null,
-    backup: null, backupConfirmed: false,
+    backup: null,
     releases: [], releasesUrl: null, releaseList: [], release: null,
     erase: false, restore: null, custom: null,
     lastError: null, lastOp: null,
@@ -408,9 +403,9 @@ export function startApp(opts = {}) {
     if (S.consent) refreshScreen();
   }
 
-  /** 這台設備的備份已存檔（下載方式存出的要使用者確認過）。備份只是建議：不影響任何按鈕能不能按。 */
+  /** 這台設備的備份已存檔（下載方式存出的瀏覽器無法確認，只提醒使用者自己看一眼）。備份只是建議：不影響任何按鈕能不能按。 */
   function backupSaved() {
-    return !!(S.backup && S.backup.saved && (S.backup.verifiable || S.backupConfirmed));
+    return !!(S.backup && S.backup.saved);
   }
   const verText = () => (S.release ? displayVersion(S.release.version) : '');
 
@@ -493,12 +488,15 @@ export function startApp(opts = {}) {
         if (sel && idx >= 0) sel.value = String(idx);
         sc.querySelector('[data-b-html="bkState"]').innerHTML = bkStateHtml();
         box(sc, 'keepList', !S.erase); box(sc, 'eraseList', S.erase);
-        $('[data-act="to-op-confirm"]', sc).disabled = !tr('reqUpd').checked;
+        sc.querySelector('[data-b-html="opRange"]').innerHTML = S.erase
+          ? `<span class="no">${L('整顆 flash 擦除後重寫（Wi-Fi 設定與校準會消失）', 'whole flash erased and rewritten (Wi-Fi settings and calibration are lost)')}</span>`
+          : L('開機程式、分區表、主程式（不動設定區）', 'bootloader, partition table, application (settings area untouched)');
+        box(sc, 'noBackupNote', !backupSaved()); box(sc, 'eraseOpt', S.erase);
+        updateConfirmButton(sc, 'start-update');
         break;
       }
-      case 'op-confirm': refreshOpConfirm(sc); break;
-      case 'restore-confirm': refreshRestoreConfirm(sc); break;
-      case 'custom-confirm': refreshCustomConfirm(sc); break;
+      case 'restore-pick': refreshRestorePick(sc); break;
+      case 'custom-pick': refreshCustomPick(sc); break;
       default: break;
     }
     fillMapSlot(sc, 'update', S.erase ? 'erase' : 'update');
@@ -534,8 +532,7 @@ export function startApp(opts = {}) {
     const mb = dev && dev.flashSizeBytes ? Math.round(dev.flashSizeBytes / 1048576) : null;
     const yes = (good) => (good ? ' <span class="ok">✓</span>' : ' <span class="no">✗</span>');
     let bk = `<span class="v info">${L('尚未備份（建議先備份）', 'No backup yet (recommended)')}</span>`;
-    if (backupSaved()) bk = `<span class="v good">${L('已存檔', 'Saved')}</span>`;
-    else if (S.backup && S.backup.saved) bk = `<span class="v warn">${L('已下載，待你確認', 'Downloaded, please confirm')}</span>`;
+    if (backupSaved()) bk = S.backup.verifiable ? `<span class="v good">${L('已存檔', 'Saved')}</span>` : `<span class="v warn">${L('已下載（請確認檔案已存好）', 'Downloaded (please check the files)')}</span>`;
     else if (S.backup) bk = `<span class="v warn">${L('已讀取，待存檔', 'Read, not saved yet')}</span>`;
     const customCtx = (S.screen || '').startsWith('custom') || (S.run && S.run.op === 'custom' && ['running', 'success', 'failure'].includes(S.screen));
     const fw = customCtx ? L('自己的檔案', 'Your own file') : S.release ? esc(verText()) : '—';
@@ -583,7 +580,7 @@ export function startApp(opts = {}) {
       binBytes: formatBytesWithCommas(b.result.bytes.length), sha: b.result.sha256,
     });
     box(sc, 'presave', !saved); box(sc, 'saved', saved); box(sc, 'saveBtns', !saved);
-    box(sc, 'unverified', saved && !b.verifiable && !S.backupConfirmed);
+    box(sc, 'unverified', saved && !b.verifiable);
     for (const kind of ['bin', 'json']) {
       const tag = $(`[data-b-tag="${kind}"]`, sc);
       if (!saved) { tag.className = 'tag off'; tag.innerHTML = L('還沒存檔', 'Not saved'); }
@@ -591,12 +588,12 @@ export function startApp(opts = {}) {
       else { tag.className = 'tag write'; tag.innerHTML = `${svgIcon('warn')}${L('已下載（無法確認）', 'Downloaded (unverified)')}`; }
     }
     if (saved) {
-      const confirmed = b.verifiable || S.backupConfirmed;
+      const confirmed = !!b.verifiable;
       const savedBox = $('[data-box="saved"]', sc);
       savedBox.classList.toggle('ok', confirmed);
       savedBox.classList.toggle('warn', !confirmed);
-      sc.querySelector('[data-b-html="savedTitle"]').innerHTML = confirmed ? L('備份完成，已存檔', 'Backup complete and saved') : L('備份已送出下載，還要你確認', 'Backup sent as downloads — please confirm');
-      sc.querySelector('[data-b-html="savedText"]').innerHTML = b.verifiable || S.backupConfirmed
+      sc.querySelector('[data-b-html="savedTitle"]').innerHTML = confirmed ? L('備份完成，已存檔', 'Backup complete and saved') : L('備份已送出下載，請確認檔案已存好', 'Backup sent as downloads — please check the files are saved');
+      sc.querySelector('[data-b-html="savedText"]').innerHTML = b.verifiable
         ? L('資料核對無誤（設備端 MD5 一致），檔案也已存到你的電腦。', "The data was verified (the device's MD5 matched) and the files were saved to your computer.")
         : L('資料核對無誤，檔案已送出下載，但瀏覽器無法確認檔案是否存好，請到「下載」資料夾確認。', 'The data was verified and the files were sent as downloads, but the browser cannot confirm they were saved; please check your Downloads folder.');
       const where = sc.querySelector('[data-b-html="savedWhere"]');
@@ -617,41 +614,45 @@ export function startApp(opts = {}) {
   function visibleReqs(sc) {
     return $$('.req', sc).filter((c) => !c.closest('[hidden]'));
   }
-  function updateConfirmButton(sc, tailInput, btnAct, needTail) {
+  function updateConfirmButton(sc, btnAct) {
     const checks = visibleReqs(sc).map((c) => c.checked);
-    const ok = confirmReady({ checks, needTail, tailInput: tailInput ? tailInput.value : '', mac: S.device ? S.device.mac : '' });
-    $(`[data-act="${btnAct}"]`, sc).disabled = !ok;
+    $(`[data-act="${btnAct}"]`, sc).disabled = !confirmReady({ checks });
   }
 
-  function refreshOpConfirm(sc) {
-    const dev = S.device;
-    bind(sc, { verText: verText(), macHtml: macHtml(dev.mac) });
-    sc.querySelector('[data-b-html="bkState"]').innerHTML = bkStateHtml();
-    sc.querySelector('[data-b-html="opRange"]').innerHTML = S.erase
-      ? `<span class="no">${L('整顆 flash 擦除後重寫（Wi-Fi 設定與校準會消失）', 'whole flash erased and rewritten (Wi-Fi settings and calibration are lost)')}</span>`
-      : L('開機程式、分區表、主程式（不動設定區）', 'bootloader, partition table, application (settings area untouched)');
-    box(sc, 'noBackupNote', !backupSaved()); box(sc, 'eraseOpt', S.erase);
-    updateConfirmButton(sc, tr('opMac'), 'start-update', true);
-  }
-
-  function refreshRestoreConfirm(sc) {
+  /** 還原選檔頁：檢查通過才顯示確認區；寫入按鈕只有「檢查通過且必勾都勾了」才啟用，其餘一律停用並說明原因。 */
+  function refreshRestorePick(sc) {
     const r = S.restore;
-    bind(sc, { macHtml: macHtml(S.device.mac), bkMac: macDisplay(r.meta.mac) });
-    box(sc, 'rcDiff', r.macDiffers); box(sc, 'rcSame', !r.macDiffers); box(sc, 'rcWarns', r.macDiffers);
-    box(sc, 'tailField', r.macDiffers);
-    box(sc, 'noBackupNote', !backupSaved());
-    updateConfirmButton(sc, tr('resType'), 'start-restore', r.macDiffers);
+    const ok = !!(r && r.ok);
+    box(sc, 'rcBlock', ok);
+    if (ok) {
+      bind(sc, { macHtml: macHtml(S.device.mac), bkMac: macDisplay(r.meta.mac) });
+      box(sc, 'rcDiff', r.macDiffers); box(sc, 'rcSame', !r.macDiffers); box(sc, 'rcWarns', r.macDiffers);
+      box(sc, 'noBackupNote', !backupSaved());
+    }
+    const picked = !!(r && r.binName && r.metaName);
+    sc.querySelector('[data-b-html="confHint"]').innerHTML = !picked ? L('請先選擇 .bin 與 .json 兩個檔案。', 'Choose both the .bin and the .json first.')
+      : !ok ? L('檢查沒有通過（看上面標紅的項目），所以不能還原。', 'A check failed (see the red item above), so restore is not allowed.')
+        : visibleReqs(sc).every((c) => c.checked) ? '' : L('勾選「我確定…」後，才能按「覆寫並開始還原」。', 'Tick “I’m sure…” to enable “Overwrite and start restore”.');
+    updateConfirmButton(sc, 'start-restore');
   }
 
-  function refreshCustomConfirm(sc) {
+  /** 自訂韌體選檔頁：同上（檢查通過才顯示確認區，必勾都勾了才啟用）。 */
+  function refreshCustomPick(sc) {
     const c = S.custom;
-    bind(sc, { macHtml: macHtml(S.device.mac), cfName: safeFileLabel(c.name), cfSize: `${formatBytesWithCommas(c.size)} ${msg('位元組', 'bytes')}`, cfSha: c.sha });
-    sc.querySelector('[data-b-html="cfRange"]').innerHTML = S.erase
-      ? `<span class="no">${L('整顆 flash 擦除後重寫（Wi-Fi 設定與校準會消失）', 'whole flash erased and rewritten (Wi-Fi settings and calibration are lost)')}</span>`
-      : L(`從位址 0 寫入 ${formatBytesWithCommas(c.size)} 位元組（不動設定區）`, `${formatBytesWithCommas(c.size)} bytes from address 0 (settings area untouched)`);
-    sc.querySelector('[data-b-html="bkState"]').innerHTML = bkStateHtml();
-    box(sc, 'noBackupNote', !backupSaved()); box(sc, 'eraseOpt', S.erase);
-    updateConfirmButton(sc, tr('cfMac'), 'start-custom', true);
+    const ok = !!(c && c.ok);
+    box(sc, 'cfBlock', ok);
+    if (ok) {
+      bind(sc, { macHtml: macHtml(S.device.mac), cfSha: c.sha });
+      sc.querySelector('[data-b-html="cfRange"]').innerHTML = S.erase
+        ? `<span class="no">${L('整顆 flash 擦除後重寫（Wi-Fi 設定與校準會消失）', 'whole flash erased and rewritten (Wi-Fi settings and calibration are lost)')}</span>`
+        : L(`從位址 0 寫入 ${formatBytesWithCommas(c.size)} 位元組（不動設定區）`, `${formatBytesWithCommas(c.size)} bytes from address 0 (settings area untouched)`);
+      sc.querySelector('[data-b-html="bkState"]').innerHTML = bkStateHtml();
+      box(sc, 'noBackupNote', !backupSaved()); box(sc, 'eraseOpt', S.erase);
+    }
+    sc.querySelector('[data-b-html="confHint"]').innerHTML = !c ? L('請先選擇韌體檔案（.bin）。', 'Choose a firmware file (.bin) first.')
+      : !ok ? L('檢查沒有通過（看上面標紅的項目），所以不能刷入。', 'A check failed (see the red item above), so flashing is not allowed.')
+        : visibleReqs(sc).every((x) => x.checked) ? '' : L('勾選所有「我了解…」後，才能按「覆寫並開始刷入」。', 'Tick every “I understand…” box to enable “Overwrite and start flashing”.');
+    updateConfirmButton(sc, 'start-custom');
   }
 
   // ---------- 進行中 ----------
@@ -766,7 +767,7 @@ export function startApp(opts = {}) {
     if (f) { try { await f.disconnect(); } catch { /* ignore */ } }
   }
   function resetSession() {
-    S.device = null; S.backup = null; S.backupConfirmed = false; S.erase = false; S.restore = null; S.custom = null; S.lastError = null;
+    S.device = null; S.backup = null; S.erase = false; S.restore = null; S.custom = null; S.lastError = null;
   }
 
   function showIdleError(e) {
@@ -805,7 +806,7 @@ export function startApp(opts = {}) {
 
   async function doBackup() {
     S.abort = new AbortController();
-    S.backup = null; S.backupConfirmed = false;
+    S.backup = null;
     startRun('backup');
     try {
       const result = await S.flasher.backup({ onProgress, signal: S.abort.signal });
@@ -874,8 +875,15 @@ export function startApp(opts = {}) {
     }
   }
 
+  /** 寫入前最後一道閘（按鈕停用之外的第二層）：檢查通過、畫面上看得到的必勾全勾了才放行。 */
+  function writeGateOpen(screen, checkedOk) {
+    const sc = $(`[data-screen="${screen}"]`, toolRoot);
+    return !!checkedOk && confirmReady({ checks: visibleReqs(sc).map((c) => c.checked) });
+  }
+
   async function doRestore() {
     const r = S.restore;
+    if (!writeGateOpen('restore-pick', r && r.ok)) return;
     S.lastOp = 'restore';
     startRun('restore');
     try {
@@ -891,6 +899,7 @@ export function startApp(opts = {}) {
   /** 刷入使用者自己的韌體：與「更新」同一條引擎路徑（受保護區避開、逐段 MD5 驗證；引擎會再檢查標頭、晶片 ID、分區表）。 */
   async function doCustom() {
     const c = S.custom;
+    if (!writeGateOpen('custom-pick', c && c.ok)) return;
     const erase = S.erase;
     S.lastOp = 'custom';
     startRun('custom');
@@ -947,6 +956,9 @@ export function startApp(opts = {}) {
   async function readPickedFile(kind, file) {
     if (!S.restore) S.restore = { bin: null, binName: '', binSize: 0, metaText: null, metaName: '', meta: null, metaError: null, result: null };
     const r = S.restore;
+    r.seq = (r.seq || 0) + 1; // 換檔：在任何 await 之前就讓上一次的檢查結果作廢
+    invalidateRestore();
+    const seq = r.seq;
     if (kind === 'bin') {
       r.binName = file.name; r.binSize = file.size;
       r.bin = file.size <= MAX_BIN ? new Uint8Array(await file.arrayBuffer()) : null;
@@ -957,17 +969,27 @@ export function startApp(opts = {}) {
         try { const m = JSON.parse(r.metaText); r.meta = m && typeof m === 'object' && !Array.isArray(m) ? m : null; r.metaError = r.meta ? null : 'bad-json'; } catch { r.meta = null; r.metaError = 'bad-json'; }
       }
     }
+    if (r.seq !== seq) return; // 讀取期間又換了檔，由最後一次的讀取負責檢查
     await evaluateRestore();
+  }
+
+  /** 還原：把上一次的檢查結果與勾選同步作廢並刷新畫面（確認區收起、寫入按鈕停用）。 */
+  function invalidateRestore() {
+    const r = S.restore;
+    const sc = $('[data-screen="restore-pick"]', toolRoot);
+    r.ok = false; r.macDiffers = false;
+    for (const c of $$('.req', sc)) c.checked = false; // 換檔就要重新勾
+    refreshScreen();
   }
 
   async function evaluateRestore() {
     const r = S.restore;
+    const seq = r.seq;
     const sc = $('[data-screen="restore-pick"]', toolRoot);
     bind(sc, { pickBinName: r.binName ? safeFileLabel(r.binName) : '—', pickJsonName: r.metaName ? safeFileLabel(r.metaName) : '—' });
     sc.querySelector('[data-b-html="pickBinInfo"]').innerHTML = r.binName ? `.bin · ${formatBytesWithCommas(r.binSize)} ${L('位元組', 'bytes')}` : '.bin';
-    const next = $('[data-act="to-restore-confirm"]', sc);
-    next.disabled = true;
-    if (!r.binName || !r.metaName) { box(sc, 'pickChecks', false); return; }
+    invalidateRestore();
+    if (!r.binName || !r.metaName) { box(sc, 'pickChecks', false); refreshScreen(); return; }
     let sha = '';
     if (r.bin) sha = bytesToHex(new Uint8Array(await subtle.digest('SHA-256', r.bin)));
     const chk = restoreChecks({
@@ -977,14 +999,14 @@ export function startApp(opts = {}) {
     if (r.bin && !chk.hardFail) {
       try { const v = await S.flasher.validateBackup(r.bin, r.metaText, S.device); engineOk = v && v.ok === true; } catch { engineOk = false; }
     }
+    if (r.seq !== seq) return; // 檢查期間又換了檔：這份結果已過期
     r.macDiffers = chk.macDiffers; r.ok = !chk.hardFail && engineOk;
     sc.querySelector('[data-b-html="checksHtml"]').innerHTML = chk.items.map((it) =>
       `<li class="${it.level}">${svgIcon(CHECK_ICON[it.level])}<div>${checkLine(it, S.device)}</div></li>`).join('')
       + (!chk.hardFail && !engineOk ? `<li class="no">${svgIcon('x')}<div>${L('引擎的檢查沒有通過（備份檔與目前設備不相容）', "The engine's own check did not pass (the backup is not compatible with this device)")}</div></li>` : '');
     box(sc, 'pickChecks', true);
     box(sc, 'pickBad', !r.ok);
-    box(sc, 'macHint', r.ok && r.macDiffers);
-    next.disabled = !r.ok;
+    refreshScreen();
   }
 
   // ---------- 自訂韌體選檔 ----------
@@ -993,10 +1015,10 @@ export function startApp(opts = {}) {
     const c = { name: file.name, size: file.size, bin: null, sha: '', ok: false, kind: 'unknown' };
     S.custom = c;
     const sc = $('[data-screen="custom-pick"]', toolRoot);
-    const next = $('[data-act="to-custom-confirm"]', sc);
-    next.disabled = true;
+    for (const x of $$('.req', sc)) x.checked = false; // 換檔就要重新勾
     bind(sc, { fwPickName: safeFileLabel(file.name) });
     sc.querySelector('[data-b-html="fwPickInfo"]').innerHTML = `.bin · ${formatBytesWithCommas(file.size)} ${L('位元組', 'bytes')}`;
+    refreshScreen(); // 在任何 await 之前就收起確認區、停用寫入按鈕（c.ok 還是 false）
     let head;
     try {
       // 檔案只在本機讀取；超過上限的不整個讀進來（只讀開頭給檢查用，反正會因大小不符被拒）
@@ -1020,14 +1042,15 @@ export function startApp(opts = {}) {
     box(sc, 'fwChecks', true);
     box(sc, 'fwBad', !c.ok);
     box(sc, 'fwOtaNote', chk.kind === 'app-only' && chk.items.some((i) => i.id === 'size' && i.level === 'ok')); // 大小不符的檔不必猜它是哪一型
-    next.disabled = !c.ok;
+    refreshScreen();
   }
   function resetCustomPick() {
     const sc = $('[data-screen="custom-pick"]', toolRoot);
     bind(sc, { fwPickName: '—' });
     sc.querySelector('[data-b-html="fwPickInfo"]').innerHTML = '.bin';
     box(sc, 'fwChecks', false);
-    $('[data-act="to-custom-confirm"]', sc).disabled = true;
+    for (const x of $$('.req', sc)) x.checked = false;
+    refreshScreen();
   }
 
   // ---------- 事件 ----------
@@ -1056,19 +1079,16 @@ export function startApp(opts = {}) {
       case 'backup': await doBackup(); break;
       case 'cancel-run': if (S.abort) { S.abort.abort(); const n = $('[data-b="cancelNote"]', toolRoot); n.hidden = false; n.textContent = msg('正在取消…', 'Cancelling…'); el.disabled = true; } break;
       case 'save-backup': await doSaveBackup(); break;
-      case 'confirm-saved': S.backupConfirmed = true; refreshScreen(); break;
-      case 'discard-backup': S.backup = null; S.backupConfirmed = false; setScreen('identified'); break;
+      case 'discard-backup': S.backup = null; setScreen('identified'); break;
       case 'finish-backup': await quietDisconnect(); resetSession(); setScreen('idle'); break;
       case 'update':
         if (S.releaseList.length === 0) break;
         S.returnTo = S.screen; S.erase = false; S.release = S.releaseList[0]; // 每次進來都預設最新版
         fillVersionSelect();
         setScreen('update-confirm');
-        tr('eraseAll').checked = false; tr('reqUpd').checked = false; refreshScreen();
+        tr('eraseAll').checked = false; for (const c of $$('.req', $('[data-screen="update-confirm"]', toolRoot))) c.checked = false; refreshScreen();
         break;
       case 'back-main': setScreen(S.returnTo === 'backup-done' && S.backup ? 'backup-done' : 'identified'); break;
-      case 'to-op-confirm': setScreen('op-confirm'); for (const c of $$('.req', $('[data-screen="op-confirm"]', toolRoot))) c.checked = false; tr('opMac').value = ''; refreshScreen(); break;
-      case 'back-update-confirm': setScreen('update-confirm'); break;
       case 'start-update': await doUpdate(); break;
       case 'restore':
         S.returnTo = S.screen; S.restore = null; setScreen('restore-pick');
@@ -1077,8 +1097,6 @@ export function startApp(opts = {}) {
         break;
       case 'pick-bin': tr('fileBin').click(); break;
       case 'pick-json': tr('fileJson').click(); break;
-      case 'to-restore-confirm': setScreen('restore-confirm'); for (const c of $$('.req', $('[data-screen="restore-confirm"]', toolRoot))) c.checked = false; tr('resType').value = ''; refreshScreen(); break;
-      case 'back-restore-pick': setScreen('restore-pick'); break;
       case 'start-restore': await doRestore(); break;
       case 'custom':
         S.returnTo = S.screen; S.custom = null; S.erase = false; setScreen('custom-pick');
@@ -1086,11 +1104,6 @@ export function startApp(opts = {}) {
         resetCustomPick();
         break;
       case 'pick-fw': tr('fileFw').click(); break;
-      case 'to-custom-confirm':
-        if (!S.custom || !S.custom.ok) break;
-        setScreen('custom-confirm'); for (const c of $$('.req', $('[data-screen="custom-confirm"]', toolRoot))) c.checked = false; tr('cfMac').value = ''; refreshScreen();
-        break;
-      case 'back-custom-pick': setScreen('custom-pick'); break;
       case 'start-custom': await doCustom(); break;
       case 'finish': resetSession(); setScreen('idle'); break;
       case 'copy-report': await copyText(buildErrorReport({ error: S.lastError, engineVersion: ENGINE_VERSION, termsVersion: CURRENT_TERMS_VERSION, stage: S.lastOp, nowIso: new Date(now()).toISOString() }), $('[data-b="copyDone"]', el.closest('.card'))); break;
@@ -1108,7 +1121,8 @@ export function startApp(opts = {}) {
     bind(sc, { pickBinName: '—', pickJsonName: '—' });
     sc.querySelector('[data-b-html="pickBinInfo"]').innerHTML = '.bin';
     box(sc, 'pickChecks', false);
-    $('[data-act="to-restore-confirm"]', sc).disabled = true;
+    for (const c of $$('.req', sc)) c.checked = false;
+    refreshScreen();
   }
 
   doc.addEventListener('click', (ev) => {
@@ -1133,15 +1147,15 @@ export function startApp(opts = {}) {
     const t = ev.target;
     if (!t || !t.id && !t.classList) return;
     if (t.id === 'fwVer') { const r = S.releaseList[Number(t.value)]; if (r) { S.release = r; refreshScreen(); } }
-    else if (t.id === 'eraseAll' || t.id === 'customEraseAll') { S.erase = t.checked; refreshScreen(); }
-    else if (t.id === 'reqUpd') { refreshScreen(); }
+    else if (t.id === 'eraseAll' || t.id === 'customEraseAll') {
+      S.erase = t.checked;
+      if (S.erase) for (const c of $$('.req[data-req="erase"]', toolRoot)) c.checked = false; // 改選整顆擦除時，擦除確認要重新勾
+      refreshScreen();
+    }
     else if (t.classList && t.classList.contains('req')) { refreshScreen(); }
     else if (t.id === 'fileBin' && t.files && t.files[0]) { readPickedFile('bin', t.files[0]).catch(() => {}); }
     else if (t.id === 'fileJson' && t.files && t.files[0]) { readPickedFile('json', t.files[0]).catch(() => {}); }
     else if (t.id === 'fileFw' && t.files && t.files[0]) { readCustomFile(t.files[0]).catch(() => {}); }
-  });
-  doc.addEventListener('input', (ev) => {
-    if (ev.target && (ev.target.id === 'opMac' || ev.target.id === 'resType' || ev.target.id === 'cfMac')) refreshScreen();
   });
   win.addEventListener('hashchange', () => {
     const route = resolveRoute({ hash: win.location.hash, consented: !!S.consent, declined: S.declined });
