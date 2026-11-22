@@ -304,7 +304,7 @@
     <label class="opt adv"><input type="checkbox" id="eraseAll"><span class="t"><b>[[進階：全部擦除（全新安裝）||Advanced: erase everything (clean install)]]</b>[[Wi-Fi 設定與校準會全部消失，裝好後要重新設定。一般更新請不要勾。||Wi-Fi settings and calibration are lost; you must set them up again. Leave unticked for a normal update.]]</span></label>
     <label class="opt"><input type="checkbox" class="req" id="reqUpd"><span class="t"><b>[[我了解寫入期間不能拔線、不能關閉這一頁||I understand I must not unplug or close this page while writing]]</b>[[中斷可能讓設備暫時無法開機（通常可以救回）。||An interruption can leave the device unable to boot (usually it can be rescued).]]</span></label>
     </div>
-    <div class="btns actbar"><button type="button" class="btn btn-ghost" data-act="back-main">[[返回||Back]]</button><button type="button" class="btn btn-write" data-act="to-op-confirm" disabled>{{I pen}}[[下一步：最後確認||Next: final check]]</button></div>
+    <div class="btns actbar"><span class="abhint">[[勾選上方「我了解…」後，才能按「下一步」。||Tick “I understand…” above to enable “Next”.]]</span><button type="button" class="btn btn-ghost" data-act="back-main">[[返回||Back]]</button><button type="button" class="btn btn-write" data-act="to-op-confirm" disabled>{{I pen}}[[下一步：最後確認||Next: final check]]</button></div>
   </section>
 </section>
 
@@ -332,7 +332,7 @@
     <div class="field"><label for="opMac">[[請輸入設備 MAC 的最後 4 碼來確認||Type the last 4 characters of the device's MAC to confirm]]</label><input type="text" id="opMac" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="····"><span class="hint">[[提示：就是上面那組 MAC 的最後 4 碼。||Hint: the last 4 characters of the MAC shown above.]]</span></div>
     </section>
   </div>
-  <div class="actbar"><span class="l">[[勾選並輸入 MAC 後，才能按「覆寫並開始更新」。||Tick the boxes and type the MAC to enable “Overwrite and start the update”.]]</span><button type="button" class="btn btn-ghost" data-act="back-update-confirm">[[返回||Back]]</button><button type="button" class="btn btn-danger" data-act="start-update" disabled>{{I warn}}[[覆寫並開始更新||Overwrite and start the update]]</button></div>
+  <div class="actbar"><span class="abhint">[[勾選並輸入 MAC 後，才能按「覆寫並開始更新」。||Tick the boxes and type the MAC to enable “Overwrite and start the update”.]]</span><button type="button" class="btn btn-ghost" data-act="back-update-confirm">[[返回||Back]]</button><button type="button" class="btn btn-danger" data-act="start-update" disabled>{{I warn}}[[覆寫並開始更新||Overwrite and start the update]]</button></div>
 </section>
 
 <!-- 還原：選檔與驗證（驗證不過時同一頁顯示「檔案不適用」） -->

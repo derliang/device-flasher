@@ -11,6 +11,7 @@
   --write:#ffb648;--on-write:#1d1100;--write-soft:rgba(255,182,72,.13);
   --danger:#ff6573;--on-danger:#1e0306;--danger-soft:rgba(255,101,115,.14);
   --focus:#9beaff;--shadow:0 22px 50px rgba(0,0,0,.45);--hatch:rgba(255,255,255,.10);
+  --edge:#7f95bd;--dis-bg:#17233b;--dis-fg:#b9c6e0;--dis-edge:#6a7ea6;
   --f-ui:"Segoe UI Variable Text","Segoe UI",-apple-system,"SF Pro Text","PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
   --f-display:"Segoe UI Variable Display","Segoe UI",-apple-system,"SF Pro Display","PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
   --f-mono:"Cascadia Mono","Cascadia Code","SF Mono",ui-monospace,Menlo,Consolas,monospace;
@@ -29,6 +30,7 @@
   --write:#a35400;--on-write:#fff;--write-soft:rgba(163,84,0,.10);
   --danger:#c42335;--on-danger:#fff;--danger-soft:rgba(196,35,53,.09);
   --focus:#0a6fd6;--shadow:0 14px 36px rgba(20,40,80,.10);--hatch:rgba(10,30,70,.10);
+  --edge:#5a6f98;--dis-bg:#dde6f3;--dis-fg:#33466d;--dis-edge:#5f739b;
   color-scheme:light}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%;background:var(--bg)}
@@ -58,10 +60,10 @@ code{font-size:.92em;padding:1px 6px;border-radius:6px;background:var(--inset);b
 .top p{margin:2px 0 0;color:var(--sub);font-size:var(--fs-label)}
 .top .grow{flex:1;min-width:0}
 .topctl{display:flex;gap:var(--s2);align-items:center;flex:none}
-.langsw{display:flex;border:1px solid var(--line);border-radius:var(--r-chip);overflow:hidden;flex:none;background:var(--panel)}
-.langsw button{font:inherit;font-size:var(--fs-label);min-height:44px;min-width:44px;padding:0 12px;border:0;background:none;color:var(--sub);cursor:pointer}
+.langsw{display:flex;border:1.5px solid var(--edge);border-radius:var(--r-chip);overflow:hidden;flex:none;background:var(--panel)}
+.langsw button{font:inherit;font-size:var(--fs-label);min-height:44px;min-width:44px;padding:0 12px;border:0;background:none;color:var(--text);cursor:pointer}
 .langsw button[aria-pressed=true]{background:var(--accent);color:var(--on-accent);font-weight:700}
-.themebtn{width:44px;height:44px;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--sub);display:grid;place-items:center;cursor:pointer;flex:none}
+.themebtn{width:44px;height:44px;border-radius:50%;border:1.5px solid var(--edge);background:var(--panel);color:var(--sub);display:grid;place-items:center;cursor:pointer;flex:none}
 .themebtn:hover{color:var(--text);border-color:var(--line2)}
 .trust{display:flex;flex-wrap:wrap;gap:var(--s2)}
 .trust>span{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:var(--r-chip);border:1px solid var(--line);background:var(--panel);font-size:var(--fs-micro);color:var(--sub)}
@@ -120,13 +122,16 @@ code{font-size:.92em;padding:1px 6px;border-radius:6px;background:var(--inset);b
 
 /* 按鈕 */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--s2);min-height:48px;padding:0 var(--s5);border-radius:var(--r-ctl);border:1px solid transparent;font:600 var(--fs-body)/1.2 var(--f-ui);cursor:pointer;text-decoration:none;text-align:center;transition:box-shadow .2s}
-.btn:disabled,.btn[aria-disabled=true]{opacity:.4;cursor:not-allowed}
+.btn:disabled,.btn[aria-disabled=true]{opacity:1;cursor:not-allowed;background:var(--dis-bg);color:var(--dis-fg);border:1.5px dashed var(--dis-edge);box-shadow:none}
 .btn-primary{background:var(--accent);color:var(--on-accent)}
 .btn-read{background:var(--safe);color:var(--on-safe)}
 .btn-write{background:var(--write);color:var(--on-write)}
 .btn-danger{background:var(--danger);color:var(--on-danger)}
-.btn-ghost{background:transparent;border-color:var(--line);color:var(--text)}
-.btn-ghost:hover{border-color:var(--line2)}
+.btn-ghost{background:transparent;border:1.5px solid var(--edge);color:var(--text);font-weight:700}
+.btn-ghost:hover{border-color:var(--text);background:var(--accent-soft)}
+.btn:not(:disabled):not([aria-disabled=true]):active{transform:translateY(1px)}
+.btn-primary,.btn-read,.btn-write,.btn-danger{font-weight:700;box-shadow:inset 0 -2px 0 rgba(0,0,0,.22)}
+.btn-read:not(:disabled):hover,.btn-write:not(:disabled):hover,.btn-primary:not(:disabled):hover,.btn-danger:not(:disabled):hover{filter:brightness(1.08)}
 .btn-primary:not(:disabled):hover,.btn-primary:not(:disabled):focus-visible{box-shadow:0 0 0 1px var(--accent),0 0 26px var(--accent-soft)}
 .btn-danger:not(:disabled):hover{box-shadow:0 0 26px var(--danger-soft)}
 .btn-sm{min-height:44px;padding:0 var(--s4);font-size:var(--fs-label)}
@@ -348,7 +353,7 @@ footer.foot{margin-top:var(--s2);padding-top:var(--s4);border-top:1px solid var(
 .steps-top .steps li{font-size:var(--fs-micro)}
 #tool-root .btns .grow{flex:0 1 auto;min-width:200px}
 .btn.lg{min-height:56px;padding:0 var(--s6);font-size:17px;min-width:260px}
-.btn.cta{box-shadow:0 0 0 4px var(--accent-soft),0 0 28px var(--accent-soft)}
+.btn.cta{box-shadow:0 0 0 4px var(--accent-soft),0 0 28px var(--accent-soft),inset 0 -2px 0 rgba(0,0,0,.22)}
 .btn.cta:disabled{box-shadow:none}
 .two{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s4);align-items:start}
 .opts2{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s3)}
@@ -356,7 +361,7 @@ footer.foot{margin-top:var(--s2);padding-top:var(--s4);border-top:1px solid var(
 .confhead h2{margin:0;font:650 22px/1.3 var(--f-display)}
 .card .ch{font:650 var(--fs-h2)/1.35 var(--f-display);margin:0}
 .actbar{display:flex;gap:var(--s3);justify-content:flex-end;align-items:center;flex-wrap:wrap}
-.actbar .l{margin-right:auto;font-size:var(--fs-label);color:var(--sub)}
+.actbar>.abhint{margin-right:auto;font-size:var(--fs-label);color:var(--sub)}
 .actbar .btn{min-width:200px}
 .actbar .btn:not(.btn-ghost){min-width:260px}
 /* 連接：編號步驟，第 3 步（按鈕）反白，旁邊放瀏覽器選埠視窗示意 */
@@ -405,7 +410,7 @@ footer.foot{margin-top:var(--s2);padding-top:var(--s4);border-top:1px solid var(
   .stepper>li.on{padding:var(--s3);grid-template-columns:28px minmax(0,1fr);gap:10px}
   .btn.lg{width:100%;min-width:0}
   .actbar .btn,.actbar .btn:not(.btn-ghost){width:100%;min-width:0}
-  .actbar .l{width:100%}
+  .actbar>.abhint{width:100%}
 }
 
 /* 動態：系統要求減少動態時全部停止 */
