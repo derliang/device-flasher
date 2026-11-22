@@ -1,0 +1,267 @@
+# 紅外線遙控器（發射＋學碼）通用韌體：共用主體。
+# 本檔由各板產品檔（ir-remote-nanoc6.yaml、ir-remote-atoms3-lite.yaml、ir-remote-atomlite.yaml）以 packages 引入；
+# 產品檔只放「這片板子才有的東西」：晶片設定、日誌介面、紅外線發射與接收腳位。
+#
+# 功能：
+#   1. 刷好後用 improv_serial（USB 線＋支援 Improv Serial 的工具，例如 ESPHome 的網頁安裝工具）自己設定 Wi-Fi，或連到裝置自己的備援熱點（無密碼的開放熱點）設定，再被 Home Assistant 找到。
+#   2. Home Assistant 動作 esphome.<裝置名>_send_raw：送任意原始脈衝。
+#        carrier_frequency  載波頻率，單位 Hz，整數（多數遙控器是 38000，也有 36000、40000、56000）
+#        code               微秒陣列：正數＝發射（mark）、負數＝空白（space），例如 [9000, -4500, 560, -560, ...]
+#   3. 學碼：外接一顆紅外線接收頭（輸出腳接到產品檔指定的接收腳），打開「Learn Mode」，用實體遙控器對接收頭按一下，
+#      收到的原始脈衝會：
+#        - 以 Home Assistant 事件 esphome.ir_remote_learned 送出（開發者工具的「事件」頁面可訂閱看到，內容直接複製貼上就能當 send_raw 的 code）
+#        - 完整字串顯示在裝置網頁的「Last Learned Code」
+#        - 以分段方式印在日誌（每行最多 200 個字元）
+#      「Replay Last Learned」按鈕把最後學到的碼用「Replay Carrier Frequency」的載波再發射一次，用來當場驗證學到的碼。
+#      Learn Mode 開啟後 60 秒自動關閉，避免背景雜訊與意外觸發。
+#   4. 名稱加 MAC 尾碼（ir-remote-xxxxxx），多台放在同一個網路不會撞名。
+#   5. 不含任何 Wi-Fi 帳密、API 加密金鑰或 OTA 密碼：Wi-Fi 在裝置上設定（improv／熱點配網）；
+#      API 先接受明文，Home Assistant 連上後可自行產生金鑰（要清掉只能恢復出廠）。
+#
+# 注意：
+#   - 學到的碼只有脈衝時間，接收頭看不出載波頻率；重送時請自己指定（先試 38000）。
+#   - Home Assistant 要允許這個裝置執行 Home Assistant 動作（裝置設定裡的選項），學碼事件才會送出。
+#   - 板子本身都沒有內建接收元件，學碼一定要外接接收頭。
+
+substitutions:
+  # 對外版號（日期編號 YYYY.MM.DD，同日第二版起加 .2）
+  firmware_version: "2026.11.22"
+  devicename: ir-remote
+  upper_devicename: IR Remote
+  # 產品版：名稱加 MAC 尾碼，多台不撞名
+  mac_suffix: "true"
+  # 接收頭輸出腳（由各板產品檔覆寫）；紅外線發射腳也由產品檔提供
+  ir_tx_pin: GPIO0
+  ir_rx_pin: GPIO0
+  # 一段脈衝結束的判定：這麼久沒有訊號就視為一個按鍵結束（冷氣類長封包請不要調太小）
+  ir_rx_idle: 25ms
+  # 少於這個脈衝數的接收視為雜訊，不記錄
+  learn_min_pulses: "6"
+  comment: Infrared remote (send raw pulses and learn codes)
+
+esphome:
+  name: $devicename
+  friendly_name: $upper_devicename
+  name_add_mac_suffix: ${mac_suffix}
+  comment: $comment
+  project:
+    name: "community.IrRemote"
+    version: ${firmware_version}
+  min_version: "2026.10.0"
+
+preferences:
+  flash_write_interval: 30s
+
+api:
+  reboot_timeout: 0s
+  # 讓裝置可以對 Home Assistant 發事件（學碼用）；Home Assistant 端要在裝置選項裡允許
+  homeassistant_services: true
+  # 不寫金鑰：先接受明文，HA 連上後可自己產生金鑰寫入。要清掉金鑰只能恢復出廠
+  encryption: {}
+  actions:
+    - action: send_raw
+      variables:
+        carrier_frequency: int
+        code: int[]
+      then:
+        - script.execute:
+            id: note_sent
+            label: "send_raw"
+        - remote_transmitter.transmit_raw:
+            carrier_frequency: !lambda 'return carrier_frequency;'
+            code: !lambda 'return code;'
+
+ota:
+  - platform: esphome
+  - platform: web_server
+
+safe_mode:
+  boot_is_good_after: 1min
+  num_attempts: 10
+
+# 不寫 SSID：帳密存在裝置裡。沒存過時開機就開熱點；有存過時斷線 5 分鐘才開，連回後自動關閉
+wifi:
+  min_auth_mode: WPA2
+  ap:
+    ap_timeout: 5min
+  power_save_mode: NONE
+  reboot_timeout: 1h
+
+captive_portal:
+
+mdns:
+  disabled: false
+
+# include_internal：學碼的完整字串只放在裝置網頁（內部實體不送 Home Assistant，避免超過 Home Assistant 狀態長度上限）
+web_server:
+  port: 80
+  include_internal: true
+  version: 3
+
+remote_transmitter:
+  id: ir_tx
+  pin: ${ir_tx_pin}
+  carrier_duty_percent: 50%
+  non_blocking: true
+
+# 接收頭多半是低電位有效的解調輸出，所以 inverted；腳位內部上拉，沒接接收頭時不會亂跳
+remote_receiver:
+  id: ir_rx
+  pin:
+    number: ${ir_rx_pin}
+    inverted: true
+    mode:
+      input: true
+      pullup: true
+  idle: ${ir_rx_idle}
+  tolerance: 25%
+  on_raw:
+    then:
+      - if:
+          condition:
+            lambda: 'return id(learn_mode).state && (millis() - id(ir_tx_ms) > 1500) && x.size() >= ${learn_min_pulses};'
+          then:
+            - lambda: |-
+                id(learned).assign(x.begin(), x.end());
+                std::string s = "[";
+                for (size_t i = 0; i < x.size(); i++) {
+                  if (i) s += ",";
+                  s += std::to_string(x[i]);
+                }
+                s += "]";
+                id(learned_text).publish_state(s);
+                id(learned_count).publish_state(x.size());
+                ESP_LOGI("learn", "learned %u pulses", (unsigned) x.size());
+                for (size_t i = 0; i < s.size(); i += 200)
+                  ESP_LOGI("learn", "code[%u]: %s", (unsigned) (i / 200), s.substr(i, 200).c_str());
+            - homeassistant.event:
+                event: esphome.ir_remote_learned
+                data:
+                  device: !lambda 'return App.get_name();'
+                  pulses: !lambda 'return std::to_string(id(learned).size());'
+                  code: !lambda 'return id(learned_text).state;'
+
+globals:
+  - id: ir_tx_ms
+    type: uint32_t
+    initial_value: "0"
+  - id: send_count
+    type: int
+    initial_value: "0"
+  - id: learned
+    type: std::vector<int32_t>
+
+script:
+  - id: note_sent
+    mode: queued
+    parameters:
+      label: string
+    then:
+      - lambda: |-
+          id(ir_tx_ms) = millis();
+          id(send_count)++;
+      - text_sensor.template.publish:
+          id: last_sent
+          state: !lambda 'return label;'
+      - sensor.template.publish:
+          id: send_count_sensor
+          state: !lambda 'return id(send_count);'
+  # Learn Mode 開著 60 秒後自動關
+  - id: learn_timeout
+    mode: restart
+    then:
+      - delay: 60s
+      - switch.turn_off: learn_mode
+
+switch:
+  - platform: template
+    name: "Learn Mode"
+    id: learn_mode
+    icon: mdi:remote
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    on_turn_on:
+      - script.execute: learn_timeout
+    on_turn_off:
+      - script.stop: learn_timeout
+
+number:
+  - platform: template
+    name: "Replay Carrier Frequency"
+    id: replay_carrier
+    optimistic: true
+    min_value: 30000
+    max_value: 60000
+    step: 1000
+    initial_value: 38000
+    restore_value: true
+    unit_of_measurement: "Hz"
+    mode: box
+    entity_category: config
+
+button:
+  - platform: template
+    name: "Replay Last Learned"
+    icon: mdi:replay
+    on_press:
+      - if:
+          condition:
+            lambda: 'return !id(learned).empty();'
+          then:
+            - script.execute:
+                id: note_sent
+                label: "replay"
+            - remote_transmitter.transmit_raw:
+                carrier_frequency: !lambda 'return (uint32_t) id(replay_carrier).state;'
+                code: !lambda 'return id(learned);'
+  - platform: restart
+    name: "Restart"
+    entity_category: diagnostic
+
+text_sensor:
+  # 完整學碼字串：內部實體，只出現在裝置網頁
+  - platform: template
+    name: "Last Learned Code"
+    id: learned_text
+    internal: true
+  - platform: template
+    name: "Last Sent"
+    id: last_sent
+    icon: mdi:remote
+    entity_category: diagnostic
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+      entity_category: diagnostic
+    mac_address:
+      name: "MAC Address"
+      entity_category: diagnostic
+  - platform: version
+    name: "ESPHome Version"
+    entity_category: diagnostic
+
+sensor:
+  - platform: template
+    name: "Last Learned Pulses"
+    id: learned_count
+    accuracy_decimals: 0
+    entity_category: diagnostic
+  - platform: template
+    name: "Send Count"
+    id: send_count_sensor
+    accuracy_decimals: 0
+    state_class: total_increasing
+    entity_category: diagnostic
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 300s
+    entity_category: diagnostic
+  - platform: uptime
+    name: "Uptime"
+    update_interval: 300s
+    entity_category: diagnostic
+
+binary_sensor:
+  - platform: status
+    name: "API Connection"
+    entity_category: diagnostic

@@ -133,9 +133,9 @@ const WF = {
     <div class="bar"><i></i><i></i><i></i><span class="url">http://sensor.example/?welcome</span></div>
     <div class="in">
       <div class="nm">${L('第一次使用引導', 'First-run guide')}</div>
-      <div class="stepb"><span class="d">1 ${L('名稱', 'Name')}</span><span class="c">2 ${L('擺放位置', 'Placement')}</span><span>3 ${L('偵測範圍', 'Range')}</span><span>4 ${L('校準與走位', 'Calibrate & walk-test')}</span></div>
-      <p class="hint">${L('說明這台感應器放在哪裡、朝哪個方向。（示意文字）', 'Tell the sensor where it sits and which way it faces. (sample text)')}</p>
-      <div class="fld">${L('例：靠牆、離地 1.2 公尺', 'e.g. on a wall, 1.2 m high')}</div>
+      <div class="stepb" style="grid-template-columns:repeat(7,1fr)"><span class="c">1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span></div>
+      <p class="hint"><b>${L('第 1／7 步：取名', 'Step 1 of 7: Name')}</b> ${L('名稱會顯示在這個網頁的標題，也會給 Home Assistant 用。建議寫位置。（示意文字）', 'The name appears in this page’s title and is also used by Home Assistant. A location works well. (sample text)')}</p>
+      <div class="fld">${L('例如：感應器 1', 'e.g. Sensor 1')}</div>
       <div class="row"><span class="mini-btn p">${L('下一步', 'Next')}</span></div>
     </div></div>`,
   flasher: () => {
@@ -143,8 +143,8 @@ const WF = {
     return `<div class="story" role="img" aria-label="${A('選好設備之後，刷機頁四個步驟示意圖', 'Sketch of the four flasher-page steps after choosing a device')}">
       ${p('02', L('連接：USB 線接電腦，按一個大按鈕選序列埠', 'Connect: plug in USB, press one big button to pick the serial port'), `<div class="row"><span class="pill g">ESP32-C3 ✓</span></div><div class="mini-btn p" style="margin-top:auto">${L('選擇序列埠並連接', 'Pick port and connect')}</div>`)}
       ${p('03', L('選擇操作：備份（選用）、更新、還原', 'Choose: backup (optional), update, restore'), `<div class="opr"><b>${L('備份', 'Backup')}</b><span class="mini-btn r">·</span></div><div class="opr"><b>${L('更新', 'Update')}</b><span class="mini-btn w">·</span></div><div class="opr"><b>${L('還原', 'Restore')}</b><span class="mini-btn d">·</span></div>`)}
-      ${p('04', L('確認：一個畫面、一個勾選', 'Confirm: one screen, one checkbox'), `<div class="row"><span class="cb k"></span><span style="font-size:11px">${L('我了解寫入期間不能拔線', 'I understand: do not unplug while writing')}</span></div><div class="mini-btn d" style="margin-top:auto">${L('覆寫並開始更新', 'Overwrite and start')}</div>`)}
-      ${p('05', L('執行：進度與驗證，完成後設備自己重新啟動', 'Run: progress and verification, then the device restarts itself'), `<div class="prog"><i></i></div><div class="row"><span class="pill g">MD5 ✓</span><span class="pill">62%</span></div>`)}
+      ${p('04', L('確認：一個畫面、一個勾選（選了「全部擦除」會多一個必勾）', 'Confirm: one screen, one checkbox (choosing “erase everything” adds a second required one)'), `<div class="row"><span class="cb k"></span><span style="font-size:11px">${L('我了解寫入期間不能拔線', 'I understand: do not unplug while writing')}</span></div><div class="mini-btn d" style="margin-top:auto">${L('覆寫並開始更新', 'Overwrite and start')}</div>`)}
+      ${p('05', L('執行：進度與驗證；完成後會自動重新啟動設備，沒成功時畫面會請你拔掉 USB 線再插回', 'Run: progress and verification; the device is restarted automatically, and if that fails the page asks you to unplug and replug the USB cable'), `<div class="prog"><i></i></div><div class="row"><span class="pill g">MD5 ✓</span><span class="pill">62%</span></div>`)}
     </div>`;
   },
   btflow: () => `
@@ -183,8 +183,8 @@ const PRESENCE = {
   feats: [
     [['刷完用手機連備援熱點設定 Wi-Fi', 'Set up Wi-Fi from your phone through the fallback hotspot'], ['還沒設定 Wi-Fi 時，裝置開機會自己開一個備援熱點；用手機或電腦連上它，依畫面輸入家裡的 Wi-Fi 名稱與密碼。這個刷機頁本身不設定 Wi-Fi。', 'With no Wi-Fi set, the device opens a fallback hotspot at boot; join it from a phone or computer and enter your home Wi-Fi name and password on the page that appears. This flasher page does not set up Wi-Fi itself.']],
     [['沒有別人的帳密與金鑰', 'No one else’s credentials or keys'], ['韌體與原始碼都不含 Wi-Fi 帳密、API 加密金鑰、OTA 密碼；每台自己設定。', 'Neither the firmware nor its source contains Wi-Fi credentials, API encryption keys or OTA passwords; each unit is set up by its owner.']],
-    [['內建網頁介面（繁體中文）', 'Built-in web page (Traditional Chinese)'], ['即時有人／無人、距離、溫度與雷達圖；基本與進階兩種模式；也有燈光聲音與系統頁。網頁只有中文（網址加 ?native 可改看 ESPHome 原始介面）。', 'Live occupancy, distance, temperature and a radar chart; basic and advanced modes; plus light/sound and system pages. The page is Chinese only (add ?native to the address to see the original ESPHome interface).']],
-    [['第一次使用引導（調校精靈）', 'First-run guide (tuning wizard)'], ['依序設定名稱、擺放位置、偵測範圍，並做校準與走位驗證。', 'Walks you through name, placement, detection range, then calibration and a walk test.']],
+    [['內建網頁介面（繁體中文）', 'Built-in web page (Traditional Chinese)'], ['即時有人／無人、距離、溫度與雷達圖；基本與進階兩種模式；也有燈光聲音與系統頁。網頁只有中文。網址加 ?native 可改看 ESPHome 原始介面，但那個介面是你的瀏覽器從外網（ESPHome 官方網站）載入的，要連得到外網才看得到。', 'Live occupancy, distance, temperature and a radar chart; basic and advanced modes; plus light/sound and system pages. The page is Chinese only. Adding ?native to the address shows the original ESPHome interface, but your browser loads that interface from the internet (the official ESPHome site), so it only appears if you are online.']],
+    [['第一次使用引導（調校精靈）', 'First-run guide (tuning wizard)'], ['共七步：取名、擺放、偵測範圍、參數讀回檢查、空房校準、走位驗證、完成摘要。', 'Seven steps: name, placement, detection range, parameter read-back check, empty-room calibration, walk test, summary.']],
     [['一鍵底噪校準', 'One-tap noise-floor calibration'], ['空房取樣各格能量，把最大值加餘裕寫回門檻；可選「坐回平常位置」的第二點；也保留雷達原廠校準。', 'Samples each gate’s energy in an empty room and writes the maximum plus a margin back as thresholds; an optional second point with you sitting where you usually do; the radar’s factory calibration is kept too.']],
     [['歷史學習建議門檻', 'History-based threshold suggestions'], ['工程模式開著時記錄各格能量，定期算出建議門檻；可套用、可復原，也可設為自動套用。', 'While engineering mode is on it records per-gate energy and periodically suggests thresholds; apply, undo, or set to auto-apply.']],
     [['有人狀態與智慧延時', 'Occupancy states and smart delay'], ['分成 Empty／Entering／Moving／Still／Leaving 五種狀態，各自有不同逾時，並說明「為什麼判定有人」。', 'Five states (Empty / Entering / Moving / Still / Leaving), each with its own timeout, plus a reason for why it says occupied.']],
@@ -201,8 +201,10 @@ const PRESENCE = {
 };
 const IRSETUP = [['刷完自己配網、接 Home Assistant', 'Set up Wi-Fi yourself, connect to Home Assistant'], ['不含任何人的私人設定與金鑰；刷好後由你自己設定網路並加入 Home Assistant。', 'No one’s private settings or keys inside; after flashing you set up the network and add it to Home Assistant yourself.']];
 const IRPULSE = [['Home Assistant 送出原始脈衝', 'Home Assistant sends raw pulses'], ['由 Home Assistant 送出紅外線的原始脈衝資料，板子照著發射。', 'Home Assistant sends raw infrared pulse data and the board emits it as is.']];
-const NOFW = ['目前還沒有韌體，也沒有實測，沒有預計開放時間；上面所有項目都是方向，不是已完成的功能。', 'There is no firmware yet and nothing has been tested; there is no release date. Everything above is a direction, not a finished feature.'];
-const NOFW_PUBLIC = ['目前沒有公開版韌體，也沒有實測，沒有預計開放時間；上面所有項目都是方向，不是已完成的功能。', 'There is no public firmware yet and nothing has been tested; there is no release date. Everything above is a direction, not a finished feature.'];
+/** 紅外線、藍牙代理、ESP8266 三張卡共用：對外的意思是「沒有公開版」（作者自己手上可能有自用版，但那不是這個頁面能刷的）。 */
+const NOFW = ['目前沒有公開版韌體，公開版也還沒實測，沒有預計開放時間；上面所有項目都是方向，不是已完成的功能。', 'There is no public firmware yet and the public version has not been tested; there is no release date. Everything above is a direction, not a finished feature.'];
+/** 紅外線卡專用：原始碼已公開但沒有編譯好的韌體，也沒有真機驗證。 */
+const NOFW_IR = ['紅外線遙控器的原始碼已公開在 esphome/ 資料夾（尚未經真機驗證），但沒有編譯好的韌體可從這個頁面刷入。', 'The infrared remote source code is public in the esphome/ folder (not yet verified on real hardware), but there is no compiled firmware you can flash from this page.'];
 const SOON = {
   ir: {
     id: 'ir', flow: 'irflow', status: 'soon', cnt: ['三種板子', '3 boards'], boardsTitle: ['三塊板子', 'The three boards'],
@@ -213,15 +215,15 @@ const SOON = {
     bens: [
       ['刷完自己配網、接上 Home Assistant（規劃中）', 'Set up Wi-Fi yourself and connect to Home Assistant (planned)'],
       ['Home Assistant 送出原始紅外線脈衝，由板子發射（規劃中）', 'Home Assistant sends raw infrared pulses and the board emits them (planned)'],
-      ['用你原本的實體遙控器對它按鍵，學下按鍵碼（規劃中；需要紅外線接收，硬體確認中）', 'Press keys on your existing remote to teach the board their codes (planned; needs infrared reception, hardware being confirmed)'],
+      ['用你原本的實體遙控器對它按鍵，學下按鍵碼（規劃中；三塊板子都沒有內建接收元件，學碼要外接紅外線接收頭）', 'Press keys on your existing remote to teach the board their codes (planned; none of the three boards has a built-in receiver, so learning needs an external infrared receiver)'],
     ],
     feats: [
       [IRSETUP[0], IRSETUP[1], null],
       [IRPULSE[0], IRPULSE[1], null],
-      [['用實體遙控器學碼', 'Learn codes from your physical remote'], ['對板子按下原本遙控器的按鍵，把按鍵碼學下來。', 'Press a key on your existing remote at the board to learn its code.'], ['需要紅外線接收（硬體確認中）。', 'Needs infrared reception (hardware being confirmed).']],
+      [['用實體遙控器學碼', 'Learn codes from your physical remote'], ['對板子按下原本遙控器的按鍵，把按鍵碼學下來。', 'Press a key on your existing remote at the board to learn its code.'], ['三塊板子都沒有內建接收元件，學碼要外接紅外線接收頭。', 'None of the three boards has a built-in receiver; learning needs an external infrared receiver module.']],
     ],
     know: [
-      NOFW,
+      NOFW_IR,
       ['三塊板子外形相近（AtomS3 Lite 與 Atom Lite 尤其像）：規劃日後支援時，刷機頁連接後會用晶片辨識是哪一款（現在還不支援）。', 'The three boards look alike (AtomS3 Lite and Atom Lite especially): once supported, the flasher is planned to tell them apart by chip after connecting (not supported yet).'],
     ],
   },
@@ -240,7 +242,7 @@ const SOON = {
       [['轉送藍牙廣播', 'Relay Bluetooth broadcasts'], ['板子收下附近藍牙裝置的廣播，轉給 Home Assistant，讓離主機太遠的藍牙裝置也看得到。', 'The board picks up nearby Bluetooth devices’ broadcasts and passes them to Home Assistant, so devices too far from the host can still be seen.'], ['具體功能範圍（有沒有設備網頁、要不要主動連線等）還沒決定。', 'The exact scope (a device page, active connections, …) has not been decided yet.']],
     ],
     know: [
-      NOFW_PUBLIC,
+      NOFW,
       ['兩塊板子外形相近：規劃日後支援時，刷機頁連接後會用晶片辨識是哪一款（現在還不支援）。', 'The two boards look alike: once supported, the flasher is planned to tell them apart by chip after connecting (not supported yet).'],
     ],
   },
@@ -261,7 +263,7 @@ const SOON = {
       [['用實體遙控器學碼', 'Learn codes from your physical remote'], ['對板上的接收頭按下原本遙控器的按鍵，把按鍵碼學下來。', 'Press a key on your existing remote at the board’s receiver to learn its code.'], ['板上有接收頭，預期學碼不需另外接零件（規劃中，尚未實測）。', 'The board has a receiver, so learning is expected to need no extra part (planned, untested).']],
     ],
     know: [
-      NOFW_PUBLIC,
+      NOFW,
       ['ESP8266 的刷機方式與 ESP32 不同，連接流程可能要另外設計；這張卡先只放介紹。', 'ESP8266 is flashed differently from ESP32, so the connect flow may need its own design; this card only introduces it for now.'],
     ],
   },
@@ -277,7 +279,7 @@ const benList = (arr, icon = 'check') => `<ul class="bens">${arr.map((b) => `<li
 const boardTile = (id, n, c) => `<div class="bt">${ART[id]()}<b>${esc(n)}</b><span class="chip">${Array.isArray(c) ? B(c) : esc(c)}</span></div>`;
 const planTag = () => `<span class="src plan">${L('規劃中', 'Planned')}</span>`;
 const chooseBtn = () => `<button type="button" class="btn btn-primary" data-act="choose-sensor">${ic('usb')}${L('選這個設備並連接', 'Choose this device and connect')}</button>`;
-const lockedBtn = () => `<button type="button" class="btn btn-primary" disabled aria-disabled="true">${ic('lock')}${L('韌體尚未開放', 'Firmware not released yet')}</button>`;
+const lockedBtn = () => `<button type="button" class="btn btn-primary" disabled aria-disabled="true">${ic('lock')}${L('公開版韌體尚未開放', 'Public firmware not released yet')}</button>`;
 
 function versionChips(ver) {
   return `<span class="chip mono">${esc(PRESENCE.chip)}</span>${ver ? `<span class="chip mono">${L('最新', 'Latest')} ${esc(ver)}</span>` : ''}`;
@@ -296,7 +298,7 @@ function cardPresence(ver) {
   </article>`;
 }
 function cardSoon(D) {
-  const tagTxt = D.status === 'plan' ? L('規劃中，尚未提供韌體', 'Planned, no firmware yet') : L('尚無韌體、尚未實測', 'No firmware yet, untested');
+  const tagTxt = D.status === 'plan' ? L('規劃中，尚無公開版韌體', 'Planned, no public firmware yet') : L('尚無公開版韌體、公開版尚未實測', 'No public firmware yet, public version untested');
   return `
   <article class="pcard soon" aria-labelledby="t-${D.id}" data-device="${D.id}" data-flashable="false">
     <div class="art"><span class="badge tag soon">${ic('clock')}${D.status === 'plan' ? L('規劃中', 'Planned') : L('即將推出', 'Coming soon')}</span>
@@ -336,8 +338,8 @@ export function renderDetail(id, ctx = {}) {
       <ul class="feat">${D.feats.map(([t, d]) => `<li>${ic('check')}<div><b>${B(t)}</b><span>${B(d)}</span></div></li>`).join('')}</ul></section>
     <section class="sec">${hx('畫面長什麼樣', 'What the screens look like')}
       <div class="shots">
-        <figure class="shot">${WF.sensor()}<figcaption><b>${L('刷好後，設備自己的網頁', 'The device’s own page after flashing')}</b><span class="mark">${L('示意（假資料），不是實機截圖', 'sketch (fake data), not a real screenshot')}</span><span>${L('有人／無人、距離、溫度與雷達圖，分「總覽、校準、燈光聲音、系統」四頁。', 'Occupancy, distance, temperature and a radar chart, split into Overview, Calibrate, Light & sound and System.')}</span></figcaption></figure>
-        <figure class="shot">${WF.wizard()}<figcaption><b>${L('第一次使用引導', 'First-run guide')}</b><span class="mark">${L('示意（假資料）', 'sketch (fake data)')}</span><span>${L('第一次打開設備網頁會出現，依序設定名稱、擺放位置、偵測範圍、校準。', 'Shown the first time you open the device page: name, placement, range, calibration.')}</span></figcaption></figure>
+        <figure class="shot">${WF.sensor()}<figcaption><b>${L('刷好後，設備自己的網頁', 'The device’s own page after flashing')}</b><span class="mark">${L('示意（假資料），不是實機截圖', 'sketch (fake data), not a real screenshot')}</span><span>${L('有人／無人、距離、溫度與雷達圖，分「總覽、校準、燈光聲音、系統」四頁；切到進階模式時，「校準」這一頁改叫「偵測調教」。', 'Occupancy, distance, temperature and a radar chart, split into Overview, Calibrate, Light & sound and System; in advanced mode the Calibrate page is named “Detection tuning”.')}</span></figcaption></figure>
+        <figure class="shot">${WF.wizard()}<figcaption><b>${L('第一次使用引導', 'First-run guide')}</b><span class="mark">${L('示意（假資料）', 'sketch (fake data)')}</span><span>${L('還沒調校過的感應器，第一次打開設備網頁會自動跳出（走完或按「略過」後不再自動跳出，之後可從設備網頁的按鈕或網址加 ?welcome 再開）。共七步：取名、擺放、偵測範圍、參數讀回檢查、空房校準、走位驗證、完成摘要。', 'On a sensor that has not been tuned yet it opens by itself the first time you open the device page (not again once finished or skipped; reopen it from a button on the device page or by adding ?welcome to the address). Seven steps: name, placement, detection range, parameter read-back check, empty-room calibration, walk test, summary.')}</span></figcaption></figure>
       </div>
       <figure class="shot gapt">${WF.flasher()}<figcaption><b>${L('選好設備後，在刷機頁刷它：四個步驟', 'After choosing the device, flashing it here takes four steps')}</b><span class="mark">${L('示意（假資料）', 'sketch (fake data)')}</span></figcaption></figure></section>
     <section class="sec">${hx('刷之前先知道', 'Before you flash')}<ul class="bens">${D.know.map((k) => `<li>${ic('info')}<span>${B(k)}</span></li>`).join('')}</ul></section>`;
@@ -349,7 +351,7 @@ export function renderDetail(id, ctx = {}) {
     <section class="hero"><div class="art"><div class="boards n${D.boards.length}">${D.boards.map(([bid, n, c]) => boardTile(bid, n, c)).join('')}</div><span class="sub mono">${L('手繪示意 · 位置與外形以實物為準', 'sketch · positions and shape follow the real device')}</span></div>
       <div class="sec"><div class="meta"><span class="tag soon">${ic('clock')}${tag}</span></div>
         <h2 class="big" tabindex="-1">${B(D.name)}</h2><p class="lead">${B(D.lead)}</p>
-        <div class="btns">${lockedBtn()}<span class="abhint">${L('沒有韌體可以刷，也沒有預計開放時間。', 'There is no firmware to flash and no planned release date.')}</span></div></div></section>
+        <div class="btns">${lockedBtn()}<span class="abhint">${L('沒有公開版韌體可以刷，也沒有預計開放時間。', 'There is no public firmware to flash and no planned release date.')}</span></div></div></section>
     <section class="sec">${hx(D.boardsTitle[0], D.boardsTitle[1])}<p class="sub">${B(D.boardsNote)}</p><div class="boards big n${D.boards.length}">${D.boards.map(([bid, n, c]) => boardTile(bid, n, c)).join('')}</div></section>
     <section class="sec">${hx('功能與好處', 'Features and benefits')}<p class="sub">${L('標「規劃中」的是還在規劃、尚未提供的項目。', 'Items marked “Planned” are still being planned and are not available yet.')}</p>
       <ul class="feat plan">${D.feats.map(([t, d, extra]) => `<li>${ic('clock')}<div><b>${B(t)}</b><span>${B(d)}</span><span>${planTag()}</span>${extra ? `<span class="sub">${B(extra)}</span>` : ''}</div></li>`).join('')}</ul></section>

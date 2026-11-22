@@ -23,6 +23,7 @@ This folder is licensed under the GNU General Public License v3.0 (see [LICENSE]
 ### 韌體設定與網頁
 
 - `presence-product.yaml`、`presence-common.yaml`、`presence-device.example.yaml`、`presence-web.js`（與縮小版 `presence-web.min.js`）：本專案自行撰寫，以 ESPHome 設定檔語法使用上述元件；網頁介面在編譯時包進韌體。
+- `ir-remote-common.yaml`、`ir-remote-nanoc6.yaml`、`ir-remote-atoms3-lite.yaml`、`ir-remote-atomlite.yaml`：本專案自行撰寫（GPL-3.0），只使用 ESPHome 內建元件，沒有複製或修改第三方程式碼。
 
 ### 網頁載入的外部資源
 

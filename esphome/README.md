@@ -1,6 +1,6 @@
 # 韌體原始碼（esphome/）
 
-這個資料夾是線上刷機頁所提供韌體的**對應原始碼**：用它可以自己編譯出同樣功能的韌體。整個資料夾以 **GPL-3.0** 發布（見 [LICENSE](LICENSE)），來源與修改聲明見 [NOTICE.md](NOTICE.md)。
+這個資料夾是線上刷機頁所提供韌體的**對應原始碼**：用它可以自己編譯出同樣功能的韌體（目前刷機頁提供的韌體只有人體感應器；紅外線遙控器只提供原始碼，見下方專節）。整個資料夾以 **GPL-3.0** 發布（見 [LICENSE](LICENSE)），來源與修改聲明見 [NOTICE.md](NOTICE.md)。
 
 韌體與這些原始碼都**不含任何 Wi-Fi 帳密、API 加密金鑰或 OTA 密碼**；Wi-Fi 在裝置上設定（下面〈設定 Wi-Fi〉）。
 
@@ -11,6 +11,10 @@
 | `presence-common.yaml` | 感應器韌體共用主體 |
 | `presence-web.js`、`presence-web.min.js` | 感應器的網頁介面（編譯時包進韌體）；`.min.js` 是 `.js` 縮小後的版本，韌體引用的是縮小版 |
 | `components/ld2410/` | 修改自 ESPHome 內建 ld2410 的元件（基底版本見 `ESPHOME_BASE_VERSION`） |
+| `ir-remote-nanoc6.yaml` | 紅外線遙控器（發射＋學碼），M5Stack NanoC6（ESP32-C6）產品檔 |
+| `ir-remote-atoms3-lite.yaml` | 紅外線遙控器，M5Stack AtomS3 Lite（ESP32-S3）產品檔 |
+| `ir-remote-atomlite.yaml` | 紅外線遙控器，M5Stack ATOM Lite（ESP32）產品檔 |
+| `ir-remote-common.yaml` | 紅外線遙控器共用主體（三個產品檔都引入它） |
 
 ## 建置環境
 
@@ -31,6 +35,9 @@
 
 ```
 esphome compile presence-product.yaml     # 人體感應器
+esphome compile ir-remote-nanoc6.yaml     # 紅外線遙控器（NanoC6）
+esphome compile ir-remote-atoms3-lite.yaml     # 紅外線遙控器（AtomS3 Lite）
+esphome compile ir-remote-atomlite.yaml   # 紅外線遙控器（ATOM Lite）
 ```
 
 輸出在 ESPHome 的建置輸出目錄（編譯結束時的訊息會印出 `firmware.factory.bin`、`firmware.ota.bin` 的完整路徑）：
@@ -74,9 +81,43 @@ esphome compile presence-product.yaml
 
 韌體不寫任何 Wi-Fi：
 
-- **感應器產品版**含 `improv_serial`：用 USB 線刷好後，在線上刷機頁或任何 Improv 工具（Improv Serial）輸入 Wi-Fi 名稱與密碼即可。沒設定 Wi-Fi 時，裝置也會開備援熱點（captive portal），連上去會跳設定頁。
+- **感應器產品版**含 `improv_serial`：用 USB 線刷好後，用支援 Improv Serial 的工具（例如 ESPHome 的網頁安裝工具）輸入 Wi-Fi 名稱與密碼即可；這個刷機頁本身不設定 Wi-Fi。沒設定 Wi-Fi 時，裝置也會開備援熱點（captive portal，無密碼的開放熱點），連上去會跳設定頁。
 
 第一次打開感應器網頁（裝置的 IP），會出現「第一次使用引導」（調校精靈），依序設定名稱、擺放位置、偵測範圍、校準與走位驗證；網址加 `?welcome` 可重看。網址加 `?native` 可回到 ESPHome 原始介面。
+
+## 紅外線遙控器（NanoC6／AtomS3 Lite／ATOM Lite）
+
+> **刷機頁目前不提供這些韌體，也沒有發布編譯好的 bin，這裡只提供原始碼；尚未經真機驗證。** 下面描述的是設計目標；三份設定目前只通過 ESPHome 設定檢查與編譯，還沒有在真實的板子上測過發射與學碼。多數腳位與下載模式資料來自廠商文件，AtomS3 Lite 的紅外線發射腳不在其中（見下表）；沒有驗證前請把它當作實驗版，要用請自行編譯。
+
+三片板子共用同一份主體（`ir-remote-common.yaml`），差別只有晶片設定與腳位：
+
+| 板子 | 檔案 | 紅外線發射腳 | 學碼接收頭建議接的腳 |
+|---|---|---|---|
+| M5Stack NanoC6 | `ir-remote-nanoc6.yaml` | GPIO3（板上內建） | GPIO2（Grove 黃線） |
+| M5Stack AtomS3 Lite | `ir-remote-atoms3-lite.yaml` | GPIO4（出自社群資料，M5 官方文件未給腳位，待真機驗證） | GPIO2（Grove 黃線） |
+| M5Stack ATOM Lite | `ir-remote-atomlite.yaml` | GPIO12（板上內建） | GPIO26（Grove 黃線） |
+
+接收腳是本韌體的設計選擇，不是板子原本就有的功能；要換腳，在產品檔的 `substitutions` 改 `ir_rx_pin`（發射腳是 `ir_tx_pin`）。
+
+功能：
+
+- **配網**：含 `improv_serial`，用 USB 線刷好後，用支援 Improv Serial 的工具（例如 ESPHome 的網頁安裝工具）輸入 Wi-Fi 名稱與密碼，或連到裝置自己的備援熱點設定（無密碼的開放熱點，與感應器一致）。名稱加 MAC 尾碼（`ir-remote-xxxxxx`），多台不撞名。
+- **從 Home Assistant 送任意原始脈衝**：裝置會在 Home Assistant 提供動作 `esphome.<裝置名>_send_raw`，參數 `carrier_frequency`（Hz，整數，常見 38000）與 `code`（微秒陣列，正數＝發射、負數＝空白）。例如：
+
+  ```yaml
+  action: esphome.ir_remote_a1b2c3_send_raw
+  data:
+    carrier_frequency: 38000
+    code: [9000, -4500, 560, -560, 560, -1680, 560, -40000]
+  ```
+- **學碼**：板子本身都沒有接收元件，要另外把一顆紅外線接收頭（解調後輸出低電位有效的那種）的訊號腳接到上表的接收腳，並共地、供電。在 Home Assistant 打開「Learn Mode」（60 秒後自動關閉），用實體遙控器對接收頭按一下鍵：
+  - 完整的脈衝陣列顯示在**裝置網頁**的「Last Learned Code」，格式與 `send_raw` 的 `code` 相同，可直接複製；
+  - 同時以 Home Assistant 事件 `esphome.ir_remote_learned` 送出（開發者工具的事件頁面訂閱它即可看到；Home Assistant 要在裝置選項裡允許該裝置執行 Home Assistant 動作）；
+  - 「Replay Last Learned」按鈕用「Replay Carrier Frequency」指定的載波把最後學到的碼再發射一次，用來當場確認學得對不對。
+  - 接收頭看不出載波頻率，學到的碼重送時請自己指定（先試 38000）。
+- **不含**任何 Wi-Fi 帳密、API 加密金鑰或 OTA 密碼（安全性見下方〈安全性：API 加密與 OTA 密碼〉，同樣適用）。
+
+刷機：目前沒有編譯好的 bin，請自己編譯後用 USB 線第一次刷（例如 `esphome run`）。三片板子都沒有內建紅外線接收元件，學碼要外接接收頭。進下載模式的方式依廠商文件：NanoC6 按住前面的按鈕再接上 USB，接上後放開；AtomS3 Lite 接上 USB 後按住電源鍵直到內部綠燈亮起再放開；ATOM Lite 的文件沒有寫手動進下載模式的方法。這些都尚未在真機確認。
 
 ## 時區
 
@@ -98,9 +139,11 @@ api:
 
 OTA 密碼請在 `presence-common.yaml` 的 `ota:` 的 `esphome` 項目加上 `password` 欄位，值寫 `!secret ota_password`。金鑰與密碼放在你自己的 `secrets.yaml`，不要提交到版本控制。
 
+紅外線遙控器要改的是 `ir-remote-common.yaml`（同樣的 `api:`／`ota:` 寫法）。另外它的裝置網頁（`web_server`，80 埠）沒有帳號密碼，只適合在內網使用，不要開放到網際網路。
+
 ## 多台與自訂
 
-多台感應器放在同一個網路：產品版名稱會加 MAC 尾碼，不會撞名。要自訂名稱，複製 `presence-device.example.yaml`，改 `devicename`、`upper_devicename`、`device_label`。時區預設 UTC，可用 `timezone` 覆寫（整點報時用）；溫濕度補償預設 0，可用 `temp_offset_default`、`humi_offset_default` 覆寫。
+多台感應器放在同一個網路：產品版名稱會加 MAC 尾碼，不會撞名。要自訂名稱，複製 `presence-device.example.yaml`，改 `devicename`、`upper_devicename`、`device_label`。時區預設台北（`Asia/Taipei`），可用 `timezone` 覆寫（整點報時用）；溫濕度補償預設 0，可用 `temp_offset_default`、`humi_offset_default` 覆寫。
 
 ## 與 ESPHome 內建 ld2410 的差異
 

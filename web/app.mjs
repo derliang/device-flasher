@@ -874,6 +874,7 @@ export function startApp(opts = {}) {
 
   async function doUpdate() {
     const rel = S.release;
+    if (!writeGateOpen('update-confirm', !!rel)) return; // 第二層：按鈕被硬開、必勾沒勾全也不寫入（與還原、自訂韌體一致）
     const erase = S.erase;
     S.lastOp = 'update';
     startRun('update');
@@ -970,22 +971,33 @@ export function startApp(opts = {}) {
   const MAX_BIN = 32 * 1024 * 1024;
   async function readPickedFile(kind, file) {
     if (!S.restore) S.restore = { bin: null, binName: '', binSize: 0, metaText: null, metaName: '', meta: null, metaError: null, result: null };
-    const r = S.restore;
+    const r = S.restore; // 全程只用這個物件：離開還原頁會換成新物件，舊讀取不能碰新物件
     r.seq = (r.seq || 0) + 1; // 換檔：在任何 await 之前就讓上一次的檢查結果作廢
+    const mine = r.seq;
+    r.reading = (r.reading || 0) + 1; // 還在讀的檔案數；全部讀完才評估，避免用到另一個檔還沒讀完的舊資料
+    // 同種檔案的舊內容同步清掉；只有「該種類最新一次選檔」的讀取才有資格寫回
+    if (kind === 'bin') { r.binTok = mine; r.binName = file.name; r.binSize = file.size; r.bin = null; }
+    else { r.metaTok = mine; r.metaName = file.name; r.metaText = null; r.meta = null; r.metaError = null; }
     invalidateRestore();
-    const seq = r.seq;
-    if (kind === 'bin') {
-      r.binName = file.name; r.binSize = file.size;
-      r.bin = file.size <= MAX_BIN ? new Uint8Array(await file.arrayBuffer()) : null;
-    } else {
-      r.metaName = file.name;
-      if (file.size > 1024 * 1024) { r.metaText = null; r.meta = null; r.metaError = 'too-big'; } else {
-        r.metaText = await file.text();
-        try { const m = JSON.parse(r.metaText); r.meta = m && typeof m === 'object' && !Array.isArray(m) ? m : null; r.metaError = r.meta ? null : 'bad-json'; } catch { r.meta = null; r.metaError = 'bad-json'; }
+    try {
+      if (kind === 'bin') {
+        const bin = file.size <= MAX_BIN ? new Uint8Array(await file.arrayBuffer()) : null;
+        if (r.binTok === mine) r.bin = bin;
+      } else if (file.size > 1024 * 1024) {
+        if (r.metaTok === mine) r.metaError = 'too-big';
+      } else {
+        const text = await file.text();
+        let meta = null; let err = null;
+        try { const m = JSON.parse(text); meta = m && typeof m === 'object' && !Array.isArray(m) ? m : null; err = meta ? null : 'bad-json'; } catch { err = 'bad-json'; }
+        if (r.metaTok === mine) { r.metaText = text; r.meta = meta; r.metaError = err; }
       }
+    } catch {
+      if (kind === 'json' && r.metaTok === mine) r.metaError = 'bad-json'; // 讀不到：資料維持空，檢查會判定不通過
+    } finally {
+      r.reading -= 1;
     }
-    if (r.seq !== seq) return; // 讀取期間又換了檔，由最後一次的讀取負責檢查
-    await evaluateRestore();
+    if (r.reading > 0 || S.restore !== r) return; // 還有檔案在讀，由最後讀完的那一次負責評估
+    await evaluateRestore(r);
   }
 
   /** 還原：把上一次的檢查結果與勾選同步作廢並刷新畫面（確認區收起、寫入按鈕停用）。 */
@@ -997,24 +1009,25 @@ export function startApp(opts = {}) {
     refreshScreen();
   }
 
-  async function evaluateRestore() {
-    const r = S.restore;
+  async function evaluateRestore(r = S.restore) {
     const seq = r.seq;
+    // 評估前拍快照：之後的 await 期間若又換檔（seq 會變），整份結果丟棄；寫入用的 r.bin／r.metaText 與快照必為同一份
+    const snap = { bin: r.bin, binName: r.binName, binSize: r.binSize, metaText: r.metaText, metaName: r.metaName, meta: r.meta, metaError: r.metaError };
     const sc = $('[data-screen="restore-pick"]', toolRoot);
-    bind(sc, { pickBinName: r.binName ? safeFileLabel(r.binName) : '—', pickJsonName: r.metaName ? safeFileLabel(r.metaName) : '—' });
-    sc.querySelector('[data-b-html="pickBinInfo"]').innerHTML = r.binName ? `.bin · ${formatBytesWithCommas(r.binSize)} ${L('位元組', 'bytes')}` : '.bin';
+    bind(sc, { pickBinName: snap.binName ? safeFileLabel(snap.binName) : '—', pickJsonName: snap.metaName ? safeFileLabel(snap.metaName) : '—' });
+    sc.querySelector('[data-b-html="pickBinInfo"]').innerHTML = snap.binName ? `.bin · ${formatBytesWithCommas(snap.binSize)} ${L('位元組', 'bytes')}` : '.bin';
     invalidateRestore();
-    if (!r.binName || !r.metaName) { box(sc, 'pickChecks', false); refreshScreen(); return; }
+    if (!snap.binName || !snap.metaName) { box(sc, 'pickChecks', false); refreshScreen(); return; }
     let sha = '';
-    if (r.bin) sha = bytesToHex(new Uint8Array(await subtle.digest('SHA-256', r.bin)));
+    if (snap.bin) sha = bytesToHex(new Uint8Array(await subtle.digest('SHA-256', snap.bin)));
     const chk = restoreChecks({
-      binLength: r.binSize, firstByte: r.bin ? r.bin[0] : undefined, sha256: sha, meta: r.meta, metaError: r.metaError, device: S.device,
+      binLength: snap.binSize, firstByte: snap.bin ? snap.bin[0] : undefined, sha256: sha, meta: snap.meta, metaError: snap.metaError, device: S.device,
     });
     let engineOk = false;
-    if (r.bin && !chk.hardFail) {
-      try { const v = await S.flasher.validateBackup(r.bin, r.metaText, S.device); engineOk = v && v.ok === true; } catch { engineOk = false; }
+    if (snap.bin && !chk.hardFail) {
+      try { const v = await S.flasher.validateBackup(snap.bin, snap.metaText, S.device); engineOk = v && v.ok === true; } catch { engineOk = false; }
     }
-    if (r.seq !== seq) return; // 檢查期間又換了檔：這份結果已過期
+    if (r.seq !== seq || S.restore !== r) return; // 檢查期間又換了檔：這份結果已過期
     r.macDiffers = chk.macDiffers; r.ok = !chk.hardFail && engineOk;
     sc.querySelector('[data-b-html="checksHtml"]').innerHTML = chk.items.map((it) =>
       `<li class="${it.level}">${svgIcon(CHECK_ICON[it.level])}<div>${checkLine(it, S.device)}</div></li>`).join('')
@@ -1097,8 +1110,8 @@ export function startApp(opts = {}) {
         S.detail = el.dataset.dev || FLASHABLE_ID;
         setScreen('device-detail');
         break;
-      case 'back-devices':
-        if (S.busy) break;
+      case 'back-devices': // 只有畫面上真的有這顆按鈕的地方（介紹頁、連接前、不支援說明、辨識錯誤）才有效；已連線的畫面與同意前一律不動
+        if (S.busy || !['device-detail', 'idle', 'unsupported', 'id-error'].includes(S.screen)) break;
         await quietDisconnect(); resetSession(); S.detail = null;
         setScreen('devices');
         break;

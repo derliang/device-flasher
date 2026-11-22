@@ -1,0 +1,25 @@
+# 紅外線遙控器：M5Stack AtomS3 Lite（ESP32-S3，8 MB flash）。共用內容在 ir-remote-common.yaml。
+# 只針對 AtomS3 Lite（無螢幕版）；有螢幕的 AtomS3 沒有驗證過，不適用。
+# 腳位：紅外線發射 LED＝GPIO4（出自社群資料，M5 官方文件未給腳位，待真機驗證）。接收頭接 Grove 孔的 GPIO2（黃線）；兩個腳位都可用 ir_tx_pin、ir_rx_pin 覆寫。
+# 板上沒有紅外線接收元件。日誌與 improv_serial 走 ESP32-S3 內建的 USB-Serial/JTAG。
+substitutions:
+  devicename: ir-remote
+  upper_devicename: IR Remote
+  mac_suffix: "true"
+  ir_tx_pin: GPIO4
+  ir_rx_pin: GPIO2
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+
+logger:
+  level: INFO
+  hardware_uart: USB_SERIAL_JTAG
+
+packages:
+  common: !include ir-remote-common.yaml
+
+improv_serial:

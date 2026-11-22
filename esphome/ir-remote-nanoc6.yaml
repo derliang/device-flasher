@@ -1,0 +1,25 @@
+# 紅外線遙控器：M5Stack NanoC6（ESP32-C6，4 MB flash）。共用內容在 ir-remote-common.yaml。
+# 腳位（M5Stack 官方文件與 ESPHome 裝置頁一致）：紅外線發射 LED＝GPIO3（板上內建）。
+# 板上沒有紅外線接收元件。學碼要把接收頭接在 Grove 孔的 GPIO2（黃線）；腳位可用 ir_rx_pin 覆寫。
+# 日誌與 improv_serial 走 ESP32-C6 內建的 USB-Serial/JTAG。
+substitutions:
+  devicename: ir-remote
+  upper_devicename: IR Remote
+  mac_suffix: "true"
+  ir_tx_pin: GPIO3
+  ir_rx_pin: GPIO2
+
+esp32:
+  variant: esp32c6
+  flash_size: 4MB
+  framework:
+    type: esp-idf
+
+logger:
+  level: INFO
+  hardware_uart: USB_SERIAL_JTAG
+
+packages:
+  common: !include ir-remote-common.yaml
+
+improv_serial:
