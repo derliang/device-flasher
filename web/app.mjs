@@ -14,6 +14,7 @@ import { confirmReady, restoreChecks, customFirmwareChecks, buildErrorReport, sa
 import { PHASES, phaseIndex, overallFraction, createRateTracker, formatEta, formatSpeed, formatSize, formatBytesWithCommas } from './progress.mjs';
 import { resolveRoute, serialSupported } from './route.mjs';
 import { TERMS_CLAUSES } from './terms-content.mjs';
+import { renderDevices, renderDetail, FLASHABLE_ID } from './devices.mjs';
 
 export const TOOL_VERSION = '0.1';
 
@@ -44,7 +45,7 @@ export function L(zh, en) {
   return `<span class="l zh">${esc(zh)}</span><span class="l en">${esc(en)}</span>`;
 }
 
-const STEP_LABELS = [['連接', 'Connect'], ['選擇操作', 'Choose'], ['確認', 'Confirm'], ['執行', 'Run']];
+const STEP_LABELS = [['選設備', 'Device'], ['連接', 'Connect'], ['選擇操作', 'Choose'], ['確認', 'Confirm'], ['執行', 'Run']];
 export function stepsHtml(cur) {
   const items = STEP_LABELS.map(([zh, en], i) => {
     const n = i + 1;
@@ -118,25 +119,25 @@ const PHASE_LABELS = {
 
 const RUN_COPY = {
   backup: {
-    steps: 4, bar: 'read', lock: 'read', icon: 'eye',
+    steps: 5, bar: 'read', lock: 'read', icon: 'eye',
     lockText: ['操作中：請不要拔線、不要關閉或重新整理這一頁', 'In progress: do not unplug the cable or close / reload this page'],
     lockSub: ['備份是唯讀的，即使中斷也不會損壞設備。', 'Backup is read-only; interrupting it cannot damage the device.'],
     title: ['正在備份韌體', 'Backing up firmware'], tag: ['唯讀', 'Read-only'], tagCls: 'read',
   },
   update: {
-    steps: 4, bar: 'write', lock: 'write', icon: 'warn',
+    steps: 5, bar: 'write', lock: 'write', icon: 'warn',
     lockText: ['寫入中：請不要拔線、不要關閉或重新整理這一頁', 'Writing: do not unplug the cable or close / reload this page'],
     lockSub: ['現在中斷可能讓設備無法開機。', 'Interrupting now may leave the device unable to boot.'],
     title: ['正在更新韌體', 'Updating firmware'], tag: ['寫入中', 'Writing'], tagCls: 'write',
   },
   custom: {
-    steps: 4, bar: 'over', lock: 'over', icon: 'warn',
+    steps: 5, bar: 'over', lock: 'over', icon: 'warn',
     lockText: ['寫入中：請不要拔線、不要關閉或重新整理這一頁', 'Writing: do not unplug the cable or close / reload this page'],
     lockSub: ['現在中斷可能讓設備無法開機。', 'Interrupting now may leave the device unable to boot.'],
     title: ['正在刷入你的韌體', 'Flashing your firmware'], tag: ['覆寫中', 'Overwriting'], tagCls: 'over',
   },
   restore: {
-    steps: 4, bar: 'over', lock: 'over', icon: 'warn',
+    steps: 5, bar: 'over', lock: 'over', icon: 'warn',
     lockText: ['寫入中：請不要拔線、不要關閉或重新整理這一頁', 'Writing: do not unplug the cable or close / reload this page'],
     lockSub: ['現在中斷可能讓設備無法開機。', 'Interrupting now may leave the device unable to boot.'],
     title: ['正在還原備份', 'Restoring backup'], tag: ['覆寫中', 'Overwriting'], tagCls: 'over',
@@ -249,7 +250,7 @@ export function startApp(opts = {}) {
   const S = {
     lang: /^zh/i.test((win.navigator && win.navigator.language) || '') ? 'zh' : 'en',
     consent: null, declined: false, oldConsent: null,
-    screen: null, termsOpen: false,
+    screen: null, termsOpen: false, detail: null,
     flasher: null, device: null, busy: false, abort: null, wake: null,
     backup: null,
     releases: [], releasesUrl: null, releaseList: [], release: null,
@@ -380,7 +381,7 @@ export function startApp(opts = {}) {
     footlinks.hidden = false;
     bind(doc, { termsVersion: CURRENT_TERMS_VERSION, toolVersion: TOOL_VERSION });
     renderTerms(tr('termsListView'));
-    S.screen = supported ? 'idle' : 'unsupported';
+    S.screen = 'devices'; // 同意之後第一個畫面是「選設備」（步驟 1）；選了感應器才進連接（或不支援的瀏覽器說明）
     const route = resolveRoute({ hash: win.location.hash, consented: true });
     S.termsOpen = route.target === 'terms';
     render();
@@ -446,6 +447,8 @@ export function startApp(opts = {}) {
     if (!sc) return;
     const dev = S.device;
     switch (S.screen) {
+      case 'devices':
+      case 'device-detail': fillDevices(sc); break;
       case 'identified': {
         bind(sc, { chip: dev.chip, macHtml: macHtml(dev.mac), flashMb: String(Math.round(dev.flashSizeBytes / 1048576)) });
         const saved = backupSaved();
@@ -505,6 +508,16 @@ export function startApp(opts = {}) {
     renderRail();
   }
 
+  /** 選設備與介紹頁：內容由 devices.mjs 產生（只有感應器有「選這個設備並連接」）；內容沒變就不重畫。 */
+  function fillDevices(sc) {
+    const ver = S.releaseList && S.releaseList[0] ? displayVersion(S.releaseList[0].version) : '';
+    const key = `${S.screen}|${S.detail || ''}|${ver}`;
+    if (sc.dataset.rendered === key) return;
+    sc.dataset.rendered = key;
+    const ctx = { steps: stepsHtml(1), version: ver };
+    sc.innerHTML = S.screen === 'devices' ? renderDevices(ctx) : renderDetail(S.detail, ctx);
+  }
+
   function fillMapSlot(root, name, mode, pct = null) {
     const slot = root && $(`[data-role="map-slot"][data-map="${name}"]`, root);
     if (slot) slot.innerHTML = fmapHtml(mode, pct);
@@ -521,9 +534,11 @@ export function startApp(opts = {}) {
     const rail = tr('rail');
     const shell = tr('shell');
     if (!rail || !shell) return;
-    const show = !S.termsOpen && S.screen && S.screen !== 'unsupported';
+    const devScreen = S.screen === 'devices' || S.screen === 'device-detail';
+    const show = !S.termsOpen && S.screen && S.screen !== 'unsupported' && !devScreen;
     rail.hidden = !show;
     shell.classList.toggle('hasrail', !!show);
+    shell.classList.toggle('devwide', devScreen && !S.termsOpen); // 選設備頁用滿版寬度（卡片橫向並排）
     if (!show) return;
     const dev = S.device;
     const bad = !!dev && S.screen === 'id-error';
@@ -1073,6 +1088,20 @@ export function startApp(opts = {}) {
   async function onAct(name, el) {
     switch (name) {
       case 'copy-url': await copyText(win.location.href.split('#')[0], $('[data-b="copyDone"]', el.closest('.card'))); break;
+      case 'choose-sensor': // 選設備只是前置畫面：只換畫面，不連接、不寫入；寫入入口的勾選與檢查閘門都在後面的畫面，完全不變
+        if (S.busy || (S.screen !== 'devices' && S.screen !== 'device-detail')) break;
+        setScreen(supported ? 'idle' : 'unsupported');
+        break;
+      case 'device-detail':
+        if (S.busy || S.screen !== 'devices') break;
+        S.detail = el.dataset.dev || FLASHABLE_ID;
+        setScreen('device-detail');
+        break;
+      case 'back-devices':
+        if (S.busy) break;
+        await quietDisconnect(); resetSession(); S.detail = null;
+        setScreen('devices');
+        break;
       case 'connect': await doConnect(); break;
       case 'reconnect': await quietDisconnect(); resetSession(); await doConnect(); break;
       case 'disconnect': await quietDisconnect(); resetSession(); setScreen('idle'); break;

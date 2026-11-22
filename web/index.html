@@ -12,12 +12,14 @@
 <!-- 本頁所有操作都在瀏覽器本機執行，不載入任何外部資源、不放分析碼。畫面文字用 [[中文||English]] 與 {{I 圖示}}，載入時由 app.mjs 展開。 -->
 </head>
 <body>
+<!-- 手繪線條的抖動濾鏡：讓簡圖的直線看起來像手畫（產品介紹卡的簡圖用） -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><filter id="rough" x="-5%" y="-5%" width="110%" height="110%"><feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="2" seed="7" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="3.2"/></filter></svg>
 <div class="wrap">
   <header class="top">
     <div class="logo"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg></div>
     <div class="grow">
       <h1><span class="l zh">裝置韌體工具</span><span class="l en">Device Firmware Tools</span></h1>
-      <p><span class="l zh">人體感應器：用 USB 備份、更新、還原。</span><span class="l en">Presence sensor: back up, update and restore over USB.</span></p>
+      <p><span class="l zh">選擇你要刷的設備，用 USB 備份、更新、還原。</span><span class="l en">Pick the device you want to flash; back up, update and restore over USB.</span></p>
     </div>
     <div class="topctl">
       <button type="button" class="themebtn" id="themeBtn" aria-label="切換深淺色 / Toggle light or dark"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z"/></svg></button>
@@ -112,6 +114,10 @@
 <aside class="rail hud" id="rail" aria-label="[[設備狀態||Device status]]" hidden></aside>
 <div id="panel-sensor">
 
+<!-- 選設備（步驟 1）與產品介紹：內容由 devices.mjs 產生。只有「人體感應器」有可進入刷機流程的按鈕；其餘設備只是介紹。 -->
+<section class="screen dv" data-screen="devices"></section>
+<section class="screen dv" data-screen="device-detail"></section>
+
 <!-- 不支援的瀏覽器 -->
 <section class="screen" data-screen="unsupported">
   <div class="note bad big">{{I warn}}<div>
@@ -130,11 +136,12 @@
     <div class="btns"><button type="button" class="btn btn-primary" data-act="copy-url">{{I copy}}[[複製本頁網址，到電腦貼上||Copy this page's link to open on a computer]]</button></div>
     <p class="hint" data-b="copyDone" hidden></p>
   </section>
+  <div class="btns"><button type="button" class="btn btn-ghost btn-sm" data-act="back-devices">{{I back}}[[回到選設備||Back to devices]]</button></div>
 </section>
 
 <!-- 未連線 -->
 <section class="screen" data-screen="idle">
-  {{STEPS 1}}
+  {{STEPS 2}}
   <div class="note bad" data-box="idleError" hidden role="alert">{{I x}}<div><b data-b="idleErrorTitle"></b><div data-b="idleErrorText"></div></div></div>
   <section class="card connect">
     <h2>[[① 連接感應器||1. Connect the sensor]]</h2>
@@ -157,12 +164,13 @@
     </ol>
     <p class="hint">[[連接只會讀取晶片資訊，不會改動設備上的任何東西。||Connecting only reads chip information; nothing on the device is changed.]]</p>
   </section>
-  <p class="hint">[[刷寫前不用選型號：這一頁目前只支援人體感應器（ESP32-C3），連線後會自動辨識。||No model to pick: this page currently supports the presence sensor (ESP32-C3) only and recognises it after connecting.]]</p>
+  <p class="hint">[[你選的是人體感應器：這一頁目前只支援它（ESP32-C3），連線後會自動辨識，不用再選型號。||You chose the presence sensor: this page currently supports only it (ESP32-C3) and recognises it after connecting, so there is no model to pick.]]</p>
+  <div class="btns"><button type="button" class="btn btn-ghost btn-sm" data-act="back-devices">{{I back}}[[回到選設備||Back to devices]]</button></div>
 </section>
 
 <!-- 已連線並辨識 -->
 <section class="screen" data-screen="identified">
-  {{STEPS 2}}
+  {{STEPS 3}}
   <div class="devbar"><span class="ico">{{I check}}</span>
     <div class="tx"><b>[[已辨識：||Detected: ]]<span data-b="chip"></span></b><span>[[與預期的設備相符，可以繼續||Matches the expected device — you can continue]]</span></div>
     <button type="button" class="btn btn-ghost btn-sm" data-act="disconnect">[[中斷連線||Disconnect]]</button></div>
@@ -205,7 +213,7 @@
 
 <!-- 辨識錯誤 -->
 <section class="screen" data-screen="id-error">
-  {{STEPS 1}}
+  {{STEPS 2}}
   <div class="note bad big" role="alert">{{I x}}<div>
     <h3 tabindex="-1" data-b="idErrTitle"></h3>
     [[這一頁只支援 ||This page supports only the ]]<b>[[人體感應器（ESP32-C3、4 MB flash）||presence sensor (ESP32-C3, 4 MB flash)]]</b>[[，但連上的是 ||, but the connected device is ]]<b data-b="detSummary"></b>[[。為了避免寫壞設備，備份、更新、還原全部停用。||. To avoid damaging a device, backup, update and restore are all disabled.]]
@@ -220,7 +228,7 @@
     <ul class="steplist" style="list-style:disc">
       <li>[[確認接的是正確的設備，換一個序列埠重新連接。||Check that the right device is connected and pick a different serial port.]]</li>
     </ul>
-    <div class="btns"><button type="button" class="btn btn-primary grow" data-act="reconnect">{{I usb}}[[換序列埠重新連接||Reconnect with another port]]</button></div>
+    <div class="btns"><button type="button" class="btn btn-primary grow" data-act="reconnect">{{I usb}}[[換序列埠重新連接||Reconnect with another port]]</button><button type="button" class="btn btn-ghost" data-act="back-devices">{{I back}}[[回到選設備||Back to devices]]</button></div>
   </section>
 </section>
 
@@ -243,7 +251,7 @@
 
 <!-- 備份完成（先「待存檔」；存檔與否都不影響更新／還原；下載方式無法確認時只顯示提醒，不擋任何按鈕） -->
 <section class="screen" data-screen="backup-done">
-  {{STEPS 4}}
+  {{STEPS 5}}
   <div class="note info big" data-box="presave">{{I info}}<div><h3 tabindex="-1">[[備份已讀完，還沒存到你的電腦||Backup read — not saved to your computer yet]]</h3>[[資料已核對無誤（設備端 MD5 一致），但<b>還沒存檔</b>。請按下面的「存檔」，選擇存放位置；沒有存下來的備份無法拿來還原。||The data was verified (the device's MD5 matched) but it is <b>not saved yet</b>. Press “Save” below and choose a location; a backup that was not saved cannot be used to restore.]]</div></div>
   <div class="note bad" data-box="saveError" hidden role="alert">{{I x}}<div><b data-b="saveErrorTitle"></b><div data-b="saveErrorText"></div></div></div>
   <div class="note ok big" data-box="saved" hidden>{{I check}}<div><h3 tabindex="-1" data-b-html="savedTitle"></h3><span data-b-html="savedText"></span></div></div>
@@ -271,7 +279,7 @@
 
 <!-- 更新確認（已合併原「最後確認」；不再輸入 MAC，設備 MAC 只當資訊顯示） -->
 <section class="screen" data-screen="update-confirm">
-  {{STEPS 3}}
+  {{STEPS 4}}
   <header class="confhead"><h2 tabindex="-1">[[更新韌體：確認||Update firmware: confirm]]</h2><span class="tag write">{{I pen}}[[會寫入設備||Writes to device]]</span></header>
   <div class="note bad">{{I warn}}<div>
     <b>[[這會覆寫設備上的韌體。||This overwrites the firmware on the device.]]</b>
@@ -317,7 +325,7 @@
 
 <!-- 還原：選檔、驗證與最後確認（同一頁；檢查通過才出現確認區，沒過時按鈕停用並說明哪項不符） -->
 <section class="screen" data-screen="restore-pick">
-  {{STEPS 3}}
+  {{STEPS 4}}
   <section class="card">
     <header style="display:flex;gap:var(--s3);align-items:center;flex-wrap:wrap"><h2 style="flex:1" tabindex="-1">[[還原備份：選擇檔案並確認||Restore a backup: choose files and confirm]]</h2><span class="tag over">{{I warn}}[[覆寫整顆 flash||Overwrites entire flash]]</span></header>
     <p class="hint">[[請同時選擇備份的 .bin 與 .json 兩個檔案（檔案只在你的瀏覽器裡讀取，不會上傳）。||Choose both the backup .bin and .json (files are only read inside your browser, never uploaded).]]</p>
@@ -358,7 +366,7 @@
 
 <!-- 自訂韌體：選檔、本機檢查與最後確認（同一頁；只收完整映像，OTA 型拒絕；檢查通過才出現確認區） -->
 <section class="screen" data-screen="custom-pick">
-  {{STEPS 3}}
+  {{STEPS 4}}
   <section class="card">
     <header style="display:flex;gap:var(--s3);align-items:center;flex-wrap:wrap"><h2 style="flex:1" tabindex="-1">[[刷入自己的韌體：選擇檔案並確認||Flash your own firmware: choose a file and confirm]]</h2><span class="tag over">{{I warn}}[[風險自負||At your own risk]]</span></header>
     <p class="hint">[[請選擇從位址 0 開始的<b>完整韌體映像</b>（含開機程式與分區表，例如 ESPHome 的 <span class="mono">*.factory.bin</span>）。檔案只在你的瀏覽器裡讀取，不會上傳。||Choose a <b>complete firmware image</b> that starts at address 0 (with bootloader and partition table, for example ESPHome's <span class="mono">*.factory.bin</span>). The file is only read inside your browser and never uploaded.]]</p>
@@ -399,7 +407,7 @@
 
 <!-- 成功 -->
 <section class="screen" data-screen="success">
-  {{STEPS 4}}
+  {{STEPS 5}}
   <div class="note ok big">{{I check}}<div><h3 tabindex="-1" data-b-html="okTitle"></h3>[[寫入內容已通過 MD5 驗證。||The written data passed MD5 verification.]]</div></div>
   <div class="note warn" data-box="resetFailed" hidden>{{I warn}}<div><b>[[自動重新啟動沒有成功||The automatic restart did not work]]</b><br>[[寫入與驗證都已完成。請拔掉 USB 線再插回，讓設備重新啟動。||Writing and verification finished. Unplug the USB cable and plug it back in to restart the device.]]</div></div>
   <section class="card">
@@ -421,7 +429,7 @@
 
 <!-- 失敗與救援 -->
 <section class="screen" data-screen="failure">
-  {{STEPS 4}}
+  {{STEPS 5}}
   <div class="note bad big" role="alert">{{I x}}<div>
     <h3 tabindex="-1" data-b-html="failTitle"></h3>
     <span class="mono" data-b="failCode"></span><br>
