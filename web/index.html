@@ -107,6 +107,7 @@
 
 <!-- ============ 工具（同意後才放進 DOM） ============ -->
 <template id="tpl-tool">
+<div class="steps-top" id="steps-top"></div>
 <div class="shell" id="shell">
 <aside class="rail hud" id="rail" aria-label="[[設備狀態||Device status]]" hidden></aside>
 <div id="panel-sensor">
@@ -135,14 +136,25 @@
 <section class="screen" data-screen="idle">
   {{STEPS 1}}
   <div class="note bad" data-box="idleError" hidden role="alert">{{I x}}<div><b data-b="idleErrorTitle"></b><div data-b="idleErrorText"></div></div></div>
-  <section class="card">
+  <section class="card connect">
     <h2>[[① 連接感應器||1. Connect the sensor]]</h2>
-    <ol class="steplist">
-      <li>[[用<b>可傳資料</b>的 USB-C 線把感應器接上電腦（只能充電的線不行）。||Plug the sensor into your computer with a <b>data-capable</b> USB-C cable (charge-only cables won't work).]]</li>
-      <li>[[關閉其他會佔用序列埠的程式（Arduino IDE、ESPHome、其他分頁的刷機頁）。||Close anything else using the serial port (Arduino IDE, ESPHome, other flasher tabs).]]</li>
-      <li>[[按下「連接設備」，在瀏覽器彈出的清單選擇名稱含「USB JTAG/serial」的序列埠。||Press “Connect device” and pick the port named “USB JTAG/serial” in the browser prompt.]]</li>
+    <ol class="stepper">
+      <li><span class="n">1</span><span>[[用<b>可傳資料</b>的 USB-C 線把感應器接上電腦（只能充電的線不行）。||Plug the sensor into your computer with a <b>data-capable</b> USB-C cable (charge-only cables won't work).]]</span></li>
+      <li><span class="n">2</span><span>[[關閉其他會佔用序列埠的程式（Arduino IDE、ESPHome、其他分頁的刷機頁）。||Close anything else using the serial port (Arduino IDE, ESPHome, other flasher tabs).]]</span></li>
+      <li class="on"><span class="n">3</span><div>
+        <b class="s3t">[[按下按鈕，在瀏覽器視窗選序列埠||Press the button, then pick the serial port in the browser window]]</b>
+        <div class="s3">
+          <div class="s3l">
+            <p class="s3d" id="connectWhy">[[按下後瀏覽器會跳出「選擇序列埠」視窗，請選名稱含 <b class="mono">USB JTAG/serial</b> 的 USB 序列埠裝置。||The browser will open a “select a serial port” window. Choose the USB serial device whose name contains <b class="mono">USB JTAG/serial</b>.]]</p>
+            <button type="button" class="btn btn-primary lg cta" data-act="connect" aria-describedby="connectWhy">{{I usb}}[[選擇序列埠並連接||Choose serial port and connect]]</button>
+          </div>
+          <div class="dlgwrap" aria-hidden="true">
+            <div class="dlg"><b>[[想連線到序列埠||Wants to connect to a serial port]]</b><div class="row sel">USB JTAG/serial device (COMx)</div><div class="row">[[其他序列埠…||Other serial ports…]]</div><div class="b2"><span>[[取消||Cancel]]</span><span class="p">[[連線||Connect]]</span></div></div>
+            <div class="dlgcap">[[瀏覽器視窗示意，實際外觀依瀏覽器而定||Illustration only; the real window depends on your browser]]</div>
+          </div>
+        </div>
+      </div></li>
     </ol>
-    <div class="btns"><button type="button" class="btn btn-primary grow" data-act="connect">{{I usb}}[[連接設備||Connect device]]</button></div>
     <p class="hint">[[連接只會讀取晶片資訊，不會改動設備上的任何東西。||Connecting only reads chip information; nothing on the device is changed.]]</p>
   </section>
   <p class="hint">[[刷寫前不用選型號：這一頁目前只支援人體感應器（ESP32-C3），連線後會自動辨識。||No model to pick: this page currently supports the presence sensor (ESP32-C3) only and recognises it after connecting.]]</p>
@@ -260,8 +272,10 @@
 <!-- 更新確認 -->
 <section class="screen" data-screen="update-confirm">
   {{STEPS 3}}
-  <section class="card gated">
-    <header style="display:flex;gap:var(--s3);align-items:center;flex-wrap:wrap"><h2 style="flex:1" tabindex="-1">[[更新韌體：確認||Update firmware: confirm]]</h2><span class="tag write">{{I pen}}[[會寫入設備||Writes to device]]</span></header>
+  <header class="confhead"><h2 tabindex="-1">[[更新韌體：確認||Update firmware: confirm]]</h2><span class="tag write">{{I pen}}[[會寫入設備||Writes to device]]</span></header>
+  <div class="two">
+    <section class="card">
+      <h3 class="ch">[[這次更新||This update]]</h3>
     <dl class="kv">
       <dt>[[設備||Device]]</dt><dd>[[人體感應器||Presence sensor]] · <span data-b="chip"></span> · <span class="mono" data-b="mac"></span></dd>
       <dt>[[將寫入的版本||Version to install]]</dt><dd><span data-b="verText"></span> <span class="sub" data-b="verDate"></span></dd>
@@ -271,7 +285,9 @@
     </dl>
     <div class="field" data-b-box="verPick" hidden><label for="fwVer">[[選擇版本（預設最新）||Choose a version (latest by default)]]</label><select id="fwVer" data-role="version-select"></select></div>
     <div class="note warn" data-box="olderNote" hidden>{{I warn}}<div>[[<b>這是較舊版本。</b>除非你知道為什麼需要它（例如新版有問題），請選最新版。||<b>This is an older version.</b> Unless you know why you need it (for example the newest one has a problem), choose the latest.]]</div></div>
-    <h3>[[寫入哪些內容||What gets written]]</h3>
+    </section>
+    <section class="card">
+    <h3 class="ch">[[寫入哪些內容||What gets written]]</h3>
     <div data-role="map-slot" data-map="update"></div>
     <ul class="checks" data-b-box="keepList">
       <li class="ok">{{I check}}<div>[[寫入：開機程式、分區表、主程式（設備上的設定區會被避開，不寫入）||Written: bootloader, partition table, application (the settings area on the device is skipped)]]</div></li>
@@ -280,9 +296,15 @@
     <ul class="checks" data-b-box="eraseList" hidden>
       <li class="warn">{{I warn}}<div>[[整顆 flash 會先擦除再寫入：Wi-Fi 設定、校準與歷史統計都會消失||The entire flash is erased and rewritten: Wi-Fi settings, calibration and history are lost]]</div></li>
     </ul>
+    </section>
+  </div>
+  <section class="card gated">
+    <h3 class="ch">[[開始前請確認||Before you start]]</h3>
+    <div class="opts2">
     <label class="opt adv"><input type="checkbox" id="eraseAll"><span class="t"><b>[[進階：全部擦除（全新安裝）||Advanced: erase everything (clean install)]]</b>[[Wi-Fi 設定與校準會全部消失，裝好後要重新設定。一般更新請不要勾。||Wi-Fi settings and calibration are lost; you must set them up again. Leave unticked for a normal update.]]</span></label>
     <label class="opt"><input type="checkbox" class="req" id="reqUpd"><span class="t"><b>[[我了解寫入期間不能拔線、不能關閉這一頁||I understand I must not unplug or close this page while writing]]</b>[[中斷可能讓設備暫時無法開機（通常可以救回）。||An interruption can leave the device unable to boot (usually it can be rescued).]]</span></label>
-    <div class="btns"><button type="button" class="btn btn-ghost" data-act="back-main">[[返回||Back]]</button><button type="button" class="btn btn-write grow" data-act="to-op-confirm" disabled>{{I pen}}[[下一步：最後確認||Next: final check]]</button></div>
+    </div>
+    <div class="btns actbar"><button type="button" class="btn btn-ghost" data-act="back-main">[[返回||Back]]</button><button type="button" class="btn btn-write" data-act="to-op-confirm" disabled>{{I pen}}[[下一步：最後確認||Next: final check]]</button></div>
   </section>
 </section>
 
@@ -293,19 +315,24 @@
     <h3 tabindex="-1">[[最後確認：這會覆寫設備上的韌體||Final check: this overwrites the firmware on the device]]</h3>
     [[寫入期間不能中斷。操作失敗或中斷，<b>可能造成設備無法使用</b>（通常還救得回來，但不保證）。||Writing cannot be interrupted. If it fails or is interrupted, <b>the device may become unusable</b> (usually it can be rescued, but this is not guaranteed).]]
   </div></div>
-  <section class="card gated">
-    <h2>[[更新韌體 ||Update firmware to ]]<span data-b="verText"></span></h2>
+  <div class="two">
+    <section class="card gated">
+    <h2 class="ch">[[更新韌體 ||Update firmware to ]]<span data-b="verText"></span></h2>
     <dl class="kv">
       <dt>[[設備||Device]]</dt><dd class="mono" data-b-html="macHtml"></dd>
       <dt>[[寫入範圍||Write range]]</dt><dd data-b-html="opRange"></dd>
       <dt>[[備份||Backup]]</dt><dd data-b-html="bkState"></dd>
     </dl>
     <div class="note info" data-box="noBackupNote" data-role="no-backup" hidden>{{I info}}<div>[[<b>尚未備份（建議先備份）。</b>沒有備份也可以繼續；但寫壞或設定被覆蓋時，就沒有辦法回到這台原本的內容。||<b>No backup yet (backing up first is recommended).</b> You can continue without one, but if the write fails or settings are overwritten there is no way back to this device's previous contents.]]</div></div>
+    </section>
+    <section class="card">
+      <h2 class="ch">[[需要你確認的事||What you need to confirm]]</h2>
     <label class="opt" data-box="eraseOpt" hidden><input type="checkbox" class="req" data-req="erase"><span class="t"><b>[[我了解整顆擦除會讓 Wi-Fi 設定與校準全部消失||I understand erasing everything removes all Wi-Fi settings and calibration]]</b></span></label>
     <label class="opt"><input type="checkbox" class="req" data-req="main"><span class="t"><b>[[我了解這個操作會覆寫設備上的韌體，可能造成設備無法使用||I understand this overwrites the firmware on the device and may make it unusable]]</b>[[寫入期間不拔線、不關閉這一頁。||I will not unplug or close this page while writing.]]</span></label>
     <div class="field"><label for="opMac">[[請輸入設備 MAC 的最後 4 碼來確認||Type the last 4 characters of the device's MAC to confirm]]</label><input type="text" id="opMac" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="····"><span class="hint">[[提示：就是上面那組 MAC 的最後 4 碼。||Hint: the last 4 characters of the MAC shown above.]]</span></div>
-    <div class="btns"><button type="button" class="btn btn-ghost" data-act="back-update-confirm">[[返回||Back]]</button><button type="button" class="btn btn-danger grow" data-act="start-update" disabled>{{I warn}}[[覆寫並開始更新||Overwrite and start the update]]</button></div>
-  </section>
+    </section>
+  </div>
+  <div class="actbar"><span class="l">[[勾選並輸入 MAC 後，才能按「覆寫並開始更新」。||Tick the boxes and type the MAC to enable “Overwrite and start the update”.]]</span><button type="button" class="btn btn-ghost" data-act="back-update-confirm">[[返回||Back]]</button><button type="button" class="btn btn-danger" data-act="start-update" disabled>{{I warn}}[[覆寫並開始更新||Overwrite and start the update]]</button></div>
 </section>
 
 <!-- 還原：選檔與驗證（驗證不過時同一頁顯示「檔案不適用」） -->
@@ -326,7 +353,7 @@
       <ul class="checks" data-b-html="checksHtml"></ul>
       <p class="hint" data-box="macHint" hidden>[[MAC 不同不是錯誤，但備份內含那台設備的 Wi-Fi 與金鑰，所以要多一道確認。||A different MAC is not an error, but the backup carries that device's Wi-Fi and keys, so it needs an extra confirmation.]]</p>
     </div>
-    <div class="btns"><button type="button" class="btn btn-ghost" data-act="back-main">[[返回||Back]]</button><button type="button" class="btn btn-danger grow" data-act="to-restore-confirm" disabled>[[下一步：確認還原||Next: confirm restore]]</button></div>
+    <div class="btns actbar"><button type="button" class="btn btn-ghost" data-act="back-main">[[返回||Back]]</button><button type="button" class="btn btn-danger grow" data-act="to-restore-confirm" disabled>[[下一步：確認還原||Next: confirm restore]]</button></div>
   </section>
 </section>
 
@@ -378,7 +405,7 @@
       <li class="warn">{{I warn}}<div>[[刷入不相容的韌體可能讓設備無法使用或失去功能；請只刷你信任、確定是給這種設備的檔案。||Flashing incompatible firmware may make the device unusable or lose features; only flash files you trust and know are meant for this device.]]</div></li>
     </ul>
     <label class="opt adv"><input type="checkbox" id="customEraseAll"><span class="t"><b>[[進階：全部擦除（全新安裝）||Advanced: erase everything (clean install)]]</b>[[Wi-Fi 設定與校準會全部消失。只有新韌體的設定區和原本的不相容時才需要。||Wi-Fi settings and calibration are lost. Only needed when the new firmware's settings area is incompatible with the current one.]]</span></label>
-    <div class="btns"><button type="button" class="btn btn-ghost" data-act="back-main">[[返回||Back]]</button><button type="button" class="btn btn-danger grow" data-act="to-custom-confirm" disabled>[[下一步：最後確認||Next: final check]]</button></div>
+    <div class="btns actbar"><button type="button" class="btn btn-ghost" data-act="back-main">[[返回||Back]]</button><button type="button" class="btn btn-danger grow" data-act="to-custom-confirm" disabled>[[下一步：最後確認||Next: final check]]</button></div>
   </section>
 </section>
 

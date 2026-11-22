@@ -338,6 +338,76 @@ footer.foot{margin-top:var(--s2);padding-top:var(--s4);border-top:1px solid var(
   .rail .rbtn{width:100%}
 }
 
+/* ===== v2.1 版面與按鈕改版（2026-11-22）：頁首、連接、選擇操作、更新確認、最後確認 =====
+   按鈕：≥561px 內容寬（最小 200px，不再撐滿整列）；手機維持整列。同意閘門（#gate-root）不變。 */
+.trust{gap:6px 24px}
+.trust>span{padding:0;border:0;background:none;border-radius:0;font-size:var(--fs-label)}
+.trust .i{width:16px;height:16px}
+.steps-top:empty{display:none}
+.screen .steps{display:none}
+.steps-top .steps li{font-size:var(--fs-micro)}
+#tool-root .btns .grow{flex:0 1 auto;min-width:200px}
+.btn.lg{min-height:56px;padding:0 var(--s6);font-size:17px;min-width:260px}
+.btn.cta{box-shadow:0 0 0 4px var(--accent-soft),0 0 28px var(--accent-soft)}
+.btn.cta:disabled{box-shadow:none}
+.two{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s4);align-items:start}
+.opts2{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s3)}
+.confhead{display:flex;justify-content:space-between;align-items:center;gap:var(--s3);flex-wrap:wrap}
+.confhead h2{margin:0;font:650 22px/1.3 var(--f-display)}
+.card .ch{font:650 var(--fs-h2)/1.35 var(--f-display);margin:0}
+.actbar{display:flex;gap:var(--s3);justify-content:flex-end;align-items:center;flex-wrap:wrap}
+.actbar .l{margin-right:auto;font-size:var(--fs-label);color:var(--sub)}
+.actbar .btn{min-width:200px}
+.actbar .btn:not(.btn-ghost){min-width:260px}
+/* 連接：編號步驟，第 3 步（按鈕）反白，旁邊放瀏覽器選埠視窗示意 */
+.stepper{display:flex;flex-direction:column;gap:var(--s3);margin:0;padding:0;list-style:none}
+.stepper>li{display:grid;grid-template-columns:32px minmax(0,1fr);gap:14px;align-items:start;font-size:var(--fs-body);line-height:1.65;color:var(--sub)}
+.stepper .n{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;border:1.5px solid var(--line2);font:700 14px var(--f-mono);color:var(--accent)}
+.stepper>li.on{background:var(--accent-soft);border:1.5px solid var(--line2);border-radius:12px;padding:var(--s5);color:var(--text);margin:4px 0}
+.stepper>li.on .n{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.s3t{font-size:16px}
+.s3{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:var(--s5);align-items:center;margin-top:10px}
+.s3l{display:flex;flex-direction:column;gap:var(--s3);align-items:flex-start}
+.s3d{margin:0;font-size:14px;line-height:1.65;color:var(--sub)}
+.s3d .mono{color:var(--text)}
+.dlg{border:1px solid var(--line2);border-radius:10px;background:var(--panel);padding:var(--s3);font-size:12px;line-height:1.4;box-shadow:0 8px 24px rgba(0,0,0,.22)}
+.dlg b{display:block;font-size:13px;margin-bottom:6px}
+.dlg .row{padding:6px 8px;border-radius:6px;border:1px solid var(--line);margin-bottom:4px;color:var(--sub)}
+.dlg .row.sel{border-color:var(--accent);background:var(--accent-soft);color:var(--text);font-weight:600}
+.dlg .b2{display:flex;gap:6px;justify-content:flex-end;margin-top:8px}
+.dlg .b2 span{padding:3px 10px;border-radius:5px;border:1px solid var(--line2);font-size:11px}
+.dlg .b2 span.p{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.dlgcap{font-size:11px;color:var(--muted);margin-top:4px;text-align:center}
+/* 更新確認、最後確認：資料列標籤在上、檢查去框線 */
+.two .kv{grid-template-columns:minmax(0,1fr);gap:0}
+.two .kv dt{padding-top:var(--s3);line-height:1.4}
+.two .kv dd{font-size:var(--fs-body);line-height:1.6;padding-bottom:2px}
+.two .kv dd[data-b="verNotes"]{font-size:14px;line-height:1.75;color:var(--sub)}
+[data-screen=update-confirm] .fmap .rg{font-size:10px;letter-spacing:-.03em}
+[data-screen=update-confirm] .checks li.ok{background:none;border:0;padding:4px 0;font-size:14px;line-height:1.6}
+.opt{padding:var(--s4) var(--s5)}
+.opt .t{font-size:14px;line-height:1.6}
+.opt .t b{font-size:16px;margin-bottom:2px}
+@media (min-width:561px){
+  #tool-root .screen{gap:var(--s5)}
+  .card,.fn{padding:var(--s6);gap:var(--s4)}
+  .fn p{font-size:16px;line-height:1.75;max-width:62ch}
+  .fn p.hint{font-size:14px;line-height:1.65}
+}
+@media (min-width:700px){
+  .two{grid-template-columns:repeat(2,minmax(0,1fr))}
+  [data-screen=update-confirm] .two{grid-template-columns:minmax(0,5fr) minmax(0,7fr)}
+  .opts2{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:560px){
+  .trust{flex-direction:column}
+  .s3{grid-template-columns:minmax(0,1fr)}
+  .stepper>li.on{padding:var(--s3);grid-template-columns:28px minmax(0,1fr);gap:10px}
+  .btn.lg{width:100%;min-width:0}
+  .actbar .btn,.actbar .btn:not(.btn-ghost){width:100%;min-width:0}
+  .actbar .l{width:100%}
+}
+
 /* 動態：系統要求減少動態時全部停止 */
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes pulse{50%{box-shadow:0 0 0 7px transparent,0 0 6px var(--safe)}}

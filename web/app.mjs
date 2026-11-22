@@ -427,6 +427,15 @@ export function startApp(opts = {}) {
       tr('scr-terms-view').querySelector('[data-b-html="recordWhere"]').innerHTML = storage ? L('只在這個瀏覽器（不上傳）', 'this browser only (not uploaded)') : L('這個瀏覽器不允許保存，只在這次瀏覽有效', 'this browser blocks storage; valid for this visit only');
     }
     refreshScreen();
+    syncSteps();
+  }
+
+  /** 把目前畫面的步驟條複製到頁首（整頁寬一條）；畫面內原本的 .steps 由 CSS 收起，DOM 保留。 */
+  function syncSteps() {
+    const top = tr('steps-top');
+    if (!top) return;
+    const src = S.termsOpen ? null : $('.screen.on .steps', tr('panel-sensor'));
+    top.innerHTML = src ? src.outerHTML : '';
   }
 
   function setScreen(name) {
@@ -531,7 +540,7 @@ export function startApp(opts = {}) {
     const customCtx = (S.screen || '').startsWith('custom') || (S.run && S.run.op === 'custom' && ['running', 'success', 'failure'].includes(S.screen));
     const fw = customCtx ? L('自己的檔案', 'Your own file') : S.release ? esc(verText()) : '—';
     const running = S.screen === 'running';
-    rail.innerHTML = `<div class="link"><span class="led ${link[0]}"></span><div class="st"><b>${link[1]}</b><span>${dev ? 'USB serial' : L('接上 USB 後按「連接設備」', 'Plug in USB, then “Connect device”')}</span></div></div>`
+    rail.innerHTML = `<div class="link"><span class="led ${link[0]}"></span><div class="st"><b>${link[1]}</b><span>${dev ? 'USB serial' : L('接上 USB 後按「選擇序列埠並連接」', 'Plug in USB, then “Choose serial port and connect”')}</span></div></div>`
       + `<div class="kvi"><span class="k">${L('晶片', 'Chip')}</span><span class="v">${dev ? esc(dev.chip) + yes(!bad || dev.reason === 'wrong-flash') : '—'}</span></div>`
       + `<div class="kvi"><span class="k">MAC</span><span class="v">${dev && dev.mac ? macHtml(dev.mac) : '—'}</span></div>`
       + `<div class="kvi"><span class="k">Flash</span><span class="v">${mb ? `${mb} MB${yes(!bad || dev.reason !== 'wrong-flash')}` : '—'}</span></div>`
@@ -672,6 +681,7 @@ export function startApp(opts = {}) {
       runTag: `${svgIcon(op === 'backup' ? 'eye' : op === 'update' ? 'pen' : 'warn')}${L(...c.tag)}`,
       pct: '0%', bytes: '', speed: '', eta: '', log: '',
     });
+    syncSteps();
     const lb = tr('lockbar');
     lb.className = `lockbar ${c.lock}`;
     lb.firstElementChild.outerHTML = svgIcon(c.icon);
@@ -789,7 +799,7 @@ export function startApp(opts = {}) {
       setScreen('idle');
       showIdleError(fe);
     } finally {
-      if (idleBtn) { idleBtn.disabled = false; idleBtn.innerHTML = `${svgIcon('usb')}${L('連接設備', 'Connect device')}`; }
+      if (idleBtn) { idleBtn.disabled = false; idleBtn.innerHTML = `${svgIcon('usb')}${L('選擇序列埠並連接', 'Choose serial port and connect')}`; }
     }
   }
 
