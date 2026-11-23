@@ -8,14 +8,15 @@ import { FlasherError, isFlasherError } from './errors.mjs';
 import {
   PROFILES,
   SECTOR,
-  PARTITION_TABLE_ADDRESS,
-  PARTITION_TABLE_LENGTH,
+  acceptedFlashSizes,
   findProfileByChip,
+  inspectBootImage,
+  layoutOf,
   normalizeRanges,
   parsePartitionTableProtected,
 } from './profiles.mjs';
 
-export const ENGINE_VERSION = '0.3.0';
+export const ENGINE_VERSION = '0.4.0';
 export { CURRENT_TERMS_VERSION };
 const READ_CHUNK = 0x10000; // 64 KB：分塊讀取，才能在塊與塊之間中止、回報進度
 // 連線與單塊讀取偶爾會卡住不動，esptool-js 自己要等很久才逾時；重新連線（重新載入 stub）後就能繼續。
@@ -412,7 +413,7 @@ export class Flasher {
       const chipProfile = expected && expected.chip === chip ? expected : expected ? null : findProfileByChip(chip, this.#profiles);
       let reason = null;
       if (!chipProfile) reason = 'wrong-chip';
-      else if (flashSizeBytes !== chipProfile.flashSizeBytes) reason = 'wrong-flash';
+      else if (!acceptedFlashSizes(chipProfile).includes(flashSizeBytes)) reason = 'wrong-flash'; // 容量以實際讀到的為準，只要在設定檔接受的清單內
 
       const dev = {
         chip,
@@ -422,6 +423,8 @@ export class Flasher {
         profile: chipProfile ? chipProfile.id : null,
         profileMatch: reason === null,
         reason,
+        // 設定檔是否已在真機驗證；false（只過假設備測試）時畫面不得標為可用。與 profileMatch 無關：辨識得出來不代表可用。
+        profileVerified: chipProfile ? chipProfile.hardwareVerified === true : false,
       };
       this.#device = dev;
       this.#backupState = null; // 換設備（或重新辨識）就要重新備份
@@ -517,7 +520,8 @@ export class Flasher {
 
       const sha256 = await this.#sha256Hex(bytes);
       const warnings = [];
-      if (bytes[0] !== 0xe9) warnings.push('no-boot-header');
+      const bootAt = (this.#profiles[dev.profile] ? layoutOf(this.#profiles[dev.profile]) : { bootloaderAddress: 0 }).bootloaderAddress;
+      if (bytes[bootAt] !== 0xe9) warnings.push('no-boot-header'); // 開機程式位置依晶片：C3／C6／S3 在 0x0，ESP32 在 0x1000
       if (isAllFF(bytes)) warnings.push('flash-blank');
       const meta = {
         format: 1,
@@ -626,7 +630,8 @@ export class Flasher {
     }
     const profile = this.#profiles[dev.profile] || findProfileByChip(dev.chip, this.#profiles);
     const magic = profile ? profile.bootMagic : 0xe9;
-    if (bin[0] !== magic) return bad('boot-header', { expected: magic, actual: bin[0] });
+    const bootAt = profile ? layoutOf(profile).bootloaderAddress : 0;
+    if (bin[bootAt] !== magic) return bad('boot-header', { expected: magic, actual: bin[bootAt], at: bootAt });
 
     if (meta) {
       const sha = await this.#sha256Hex(bin);
@@ -749,10 +754,11 @@ export class Flasher {
     const ranges = [...(profile.protectedRegions || [])];
     const warnings = [];
     if (profile.readPartitionTable) {
+      const { partitionTableAddress: PT_ADDR, partitionTableLength: PT_LEN } = layoutOf(profile);
       const loader = this.#requireLoader();
       throwIfAborted(signal);
       try {
-        const tbl = await loader.readFlash(PARTITION_TABLE_ADDRESS, PARTITION_TABLE_LENGTH);
+        const tbl = await loader.readFlash(PT_ADDR, PT_LEN);
         ranges.push(...parsePartitionTableProtected(toU8(tbl)));
       } catch (e) {
         warnings.push('partition-table-unreadable');
@@ -760,9 +766,9 @@ export class Flasher {
       // 新映像若自帶分區表（合併的 factory.bin），NVS 位置也一併保護；位置若與設備上的不同要警告
       for (const p of parts) {
         const end = p.address + p.data.length;
-        if (p.address <= PARTITION_TABLE_ADDRESS && end >= PARTITION_TABLE_ADDRESS + PARTITION_TABLE_LENGTH) {
-          const rel = PARTITION_TABLE_ADDRESS - p.address;
-          const incoming = parsePartitionTableProtected(p.data.subarray(rel, rel + PARTITION_TABLE_LENGTH));
+        if (p.address <= PT_ADDR && end >= PT_ADDR + PT_LEN) {
+          const rel = PT_ADDR - p.address;
+          const incoming = parsePartitionTableProtected(p.data.subarray(rel, rel + PT_LEN));
           const before = ranges.length;
           ranges.push(...incoming);
           if (incoming.length && ranges.length > before) warnings.push('incoming-partition-table-has-nvs');
@@ -793,16 +799,10 @@ export class Flasher {
         const data = toU8(p.data);
         if (data.length === 0) throw new FlasherError('bad-parts', { reason: 'empty-part', index: i });
         if (p.address + data.length > dev.flashSizeBytes) throw new FlasherError('bad-parts', { reason: 'beyond-flash', index: i });
-        if (p.address === 0) {
-          if (data[0] !== profile.bootMagic) throw new FlasherError('bad-parts', { reason: 'boot-header', index: i });
-          if (profile.imageChipId != null && (data.length < 16 || (data[12] | (data[13] << 8)) !== profile.imageChipId)) {
-            throw new FlasherError('bad-parts', { reason: 'image-chip-id', index: i, expected: profile.imageChipId });
-          }
-          // 從位址 0 寫、又蓋過分區表位置的映像，必須是「完整映像」（0x8000 有分區表）。
-          // 只有 app 的映像（OTA 型）開頭同樣是 0xE9，寫到位址 0 會蓋掉開機程式，所以拒絕。
-          if (data.length > PARTITION_TABLE_ADDRESS && !(data[PARTITION_TABLE_ADDRESS] === 0xaa && data[PARTITION_TABLE_ADDRESS + 1] === 0x50)) {
-            throw new FlasherError('bad-parts', { reason: 'no-partition-table', index: i });
-          }
+        // 會碰到開機程式的段落（位址 0 的合併映像、或剛好在 bootloader 位址）必須是合格的開機映像；位置與晶片 ID 依設定檔。
+        const chk = inspectBootImage(profile, data, p.address);
+        if (!chk.ok) {
+          throw new FlasherError('bad-parts', { reason: chk.reason, index: i, ...(chk.expected != null ? { expected: chk.expected } : {}) });
         }
         return { address: p.address, data };
       });

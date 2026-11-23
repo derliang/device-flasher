@@ -99,6 +99,8 @@ esphome compile presence-product.yaml
 
 接收腳是本韌體的設計選擇，不是板子原本就有的功能；要換腳，在產品檔的 `substitutions` 改 `ir_rx_pin`（發射腳是 `ir_tx_pin`）。
 
+注意（ATOM Lite）：GPIO12 是 ESP32 的 strapping 腳（開機時的電位會決定內部 flash 的供電電壓），M5Stack 官方文件把它接到板上的紅外線 LED。這份設定沿用官方腳位，但開機時這個腳位與紅外線 LED 的互相影響**尚未在真機驗證**；如果發現開機異常（不斷重開、刷入後無法啟動），先懷疑這一點。
+
 功能：
 
 - **配網**：含 `improv_serial`，用 USB 線刷好後，用支援 Improv Serial 的工具（例如 ESPHome 的網頁安裝工具）輸入 Wi-Fi 名稱與密碼，或連到裝置自己的備援熱點設定（無密碼的開放熱點，與感應器一致）。名稱加 MAC 尾碼（`ir-remote-xxxxxx`），多台不撞名。
@@ -110,11 +112,12 @@ esphome compile presence-product.yaml
     carrier_frequency: 38000
     code: [9000, -4500, 560, -560, 560, -1680, 560, -40000]
   ```
-- **學碼**：板子本身都沒有接收元件，要另外把一顆紅外線接收頭（解調後輸出低電位有效的那種）的訊號腳接到上表的接收腳，並共地、供電。在 Home Assistant 打開「Learn Mode」（60 秒後自動關閉），用實體遙控器對接收頭按一下鍵：
+- **學碼**：板子本身都沒有接收元件，要另外把一顆紅外線接收頭（解調後輸出低電位有效的那種）的訊號腳接到上表的接收腳，並共地、供電。**接收頭請選 3.3V 可以工作的型號，並確認它的輸出電平不會超過 3.3V**（這些腳位不耐 5V；常見的 5V 專用接收頭不要直接接）。在 Home Assistant 打開「Learn Mode」（60 秒後自動關閉），用實體遙控器對接收頭按一下鍵：
   - 完整的脈衝陣列顯示在**裝置網頁**的「Last Learned Code」，格式與 `send_raw` 的 `code` 相同，可直接複製；
   - 同時以 Home Assistant 事件 `esphome.ir_remote_learned` 送出（開發者工具的事件頁面訂閱它即可看到；Home Assistant 要在裝置選項裡允許該裝置執行 Home Assistant 動作）；
   - 「Replay Last Learned」按鈕用「Replay Carrier Frequency」指定的載波把最後學到的碼再發射一次，用來當場確認學得對不對。
   - 接收頭看不出載波頻率，學到的碼重送時請自己指定（先試 38000）。
+- **裝置網頁**：用 ESPHome 內建 `web_server` 的預設介面（版本 3）。這個預設介面的腳本不在韌體裡，而是開網頁的瀏覽器從 ESPHome 官方網站（`oi.esphome.io`）載入；所以開那個網頁的電腦需要能連上網際網路，沒有網際網路時網頁可能無法顯示（尚未驗證）。要完全離線，需要自己改設定（例如 `web_server` 的 `js_url`／`js_include` 自備腳本）後重新編譯。
 - **不含**任何 Wi-Fi 帳密、API 加密金鑰或 OTA 密碼（安全性見下方〈安全性：API 加密與 OTA 密碼〉，同樣適用）。
 
 刷機：目前沒有編譯好的 bin，請自己編譯後用 USB 線第一次刷（例如 `esphome run`）。三片板子都沒有內建紅外線接收元件，學碼要外接接收頭。進下載模式的方式依廠商文件：NanoC6 按住前面的按鈕再接上 USB，接上後放開；AtomS3 Lite 接上 USB 後按住電源鍵直到內部綠燈亮起再放開；ATOM Lite 的文件沒有寫手動進下載模式的方法。這些都尚未在真機確認。
@@ -139,7 +142,9 @@ api:
 
 OTA 密碼請在 `presence-common.yaml` 的 `ota:` 的 `esphome` 項目加上 `password` 欄位，值寫 `!secret ota_password`。金鑰與密碼放在你自己的 `secrets.yaml`，不要提交到版本控制。
 
-紅外線遙控器要改的是 `ir-remote-common.yaml`（同樣的 `api:`／`ota:` 寫法）。另外它的裝置網頁（`web_server`，80 埠）沒有帳號密碼，只適合在內網使用，不要開放到網際網路。
+紅外線遙控器要改的是 `ir-remote-common.yaml`（同樣的 `api:`／`ota:` 寫法）。另外它的裝置網頁（`web_server`，80 埠）沒有帳號密碼，**網頁上傳韌體（網頁 OTA）也沒有密碼**，同一個網路的人都能開啟、並上傳韌體換掉它，只適合在可信的內網使用，不要開放到網際網路。人體感應器的裝置網頁同樣可以上傳韌體（見〈刷機〉），一樣沒有密碼。
+
+藍牙代理沒有裝置網頁，但設定檔展開後仍帶有網頁 OTA 項目：ESPHome 在備援熱點（captive portal）開著時會一併提供上傳頁，沒有密碼（依 `esphome config` 的展開結果，尚未在真機確認）；熱點只在沒存過 Wi-Fi 或斷線一段時間後才會開。
 
 ## 多台與自訂
 
@@ -148,3 +153,32 @@ OTA 密碼請在 `presence-common.yaml` 的 `ota:` 的 `esphome` 項目加上 `p
 ## 與 ESPHome 內建 ld2410 的差異
 
 見 [NOTICE.md](NOTICE.md)。簡述：加入原廠底噪校準指令、把校準中／成功／失敗的目標狀態和「有目標」分開、記錄資料幀時間供斷線偵測，其餘與 ESPHome 2026.10.1 原版相同。
+
+## 藍牙代理（AtomS3 Lite／ATOM Lite）
+
+> **刷機頁目前不提供這些韌體，也沒有發布編譯好的 bin，這裡只提供原始碼；尚未經真機驗證。** 下面描述的是設計目標；兩份設定目前只通過 ESPHome 設定檢查與編譯，還沒有在真實的板子上測過配網、與 Home Assistant 連線與收發藍牙廣播。沒有驗證前請把它當作實驗版，要用請自行編譯。
+
+兩片板子共用同一份主體（`btproxy-common.yaml`），差別只有晶片設定與日誌介面；這份韌體沒有用到任何板上腳位（沒有燈、沒有按鍵、沒有紅外線）：
+
+| 板子 | 檔案 | 晶片與 flash |
+|---|---|---|
+| M5Stack AtomS3 Lite（無螢幕版） | `btproxy-atoms3-lite.yaml` | ESP32-S3，8 MB（M5Stack 官方文件） |
+| M5Stack ATOM Lite | `btproxy-atomlite.yaml` | ESP32-PICO-D4，4 MB（M5Stack 官方文件） |
+
+編譯（在這個資料夾執行，建置環境與去識別化做法見前面的〈建置環境〉〈編譯〉）：
+
+```
+esphome compile btproxy-atoms3-lite.yaml   # AtomS3 Lite
+esphome compile btproxy-atomlite.yaml      # ATOM Lite
+```
+
+功能：
+
+- **藍牙代理**：板子收附近藍牙裝置的廣播，轉給 Home Assistant，讓離主機太遠的藍牙裝置也看得到。設為「主動」模式（`bluetooth_proxy: active: true`），Home Assistant 也可以透過這塊板子主動連線到藍牙裝置；連線數與掃描間隔、掃描視窗都用 ESPHome 內建預設值，沒有為任何特定環境調整。
+- **配網**：含 `improv_serial`，用 USB 線刷好後，用支援 Improv Serial 的工具（例如 ESPHome 的網頁安裝工具）輸入 Wi-Fi 名稱與密碼，或連到裝置自己的備援熱點設定（無密碼的開放熱點，與感應器、紅外線遙控器一致）。名稱加 MAC 尾碼（`bluetooth-proxy-xxxxxx`），多台不撞名。
+- **不含**任何 Wi-Fi 帳密、API 加密金鑰或 OTA 密碼（安全性見前面〈安全性：API 加密與 OTA 密碼〉，同樣適用；要改的是 `btproxy-common.yaml` 的 `api:`／`ota:`）。
+- **沒有裝置網頁**（沒有 `web_server`）：藍牙代理很吃記憶體，第一版先不開；韌體更新走 ESPHome OTA（`esphome upload btproxy-xxx.yaml --device <裝置 IP>`）。因為沒有 `web_server`，也就沒有「裝置網頁從 ESPHome 官方網站載入腳本」的外連（紅外線遙控器與感應器的 `?native` 才有，見上方各段與 NOTICE）；備援熱點的設定頁是韌體內建的，不需要外網。
+
+放在哪裡、叫什麼名字，都在 Home Assistant 設定；這份原始碼不預設任何位置或房間。
+
+刷機：目前沒有編譯好的 bin，請自己編譯後用 USB 線第一次刷（例如 `esphome run`）。進下載模式的方式依廠商文件：AtomS3 Lite 接上 USB 後按住電源鍵直到內部綠燈亮起再放開；ATOM Lite 的文件沒有寫手動進下載模式的方法。日誌與 `improv_serial` 在 AtomS3 Lite 走晶片內建的 USB-Serial/JTAG、在 ATOM Lite 走 UART0（板上 USB 轉序列），這兩點都**尚未在真機確認**；如果實際不是這樣，improv 與日誌會失效，要改設定。

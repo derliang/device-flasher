@@ -4,13 +4,13 @@
 
 import { FlasherError, ERROR_TABLE } from '../engine/errors.mjs';
 import { ENGINE_VERSION } from '../engine/flasher-engine.mjs';
-import { PROFILES } from '../engine/profiles.mjs';
+import { PROFILES, layoutOf } from '../engine/profiles.mjs';
 import {
   CURRENT_TERMS_VERSION, createConsentStore, evaluateStoredConsent, gateProgress, isScrolledToEnd,
   makeRecord, consentForEngine, consentRecordJson,
 } from './consent-gate.mjs';
 import { listReleases, parseReleases, resolveFileUrl, verifyDownload, bytesToHex, displayVersion, releaseNotes, releaseDate } from './releases.mjs';
-import { confirmReady, restoreChecks, customFirmwareChecks, buildErrorReport, safeFileLabel } from './checks.mjs';
+import { confirmReady, restoreChecks, customFirmwareChecks, deviceAccess, buildErrorReport, safeFileLabel } from './checks.mjs';
 import { PHASES, phaseIndex, overallFraction, createRateTracker, formatEta, formatSpeed, formatSize, formatBytesWithCommas } from './progress.mjs';
 import { resolveRoute, serialSupported } from './route.mjs';
 import { TERMS_CLAUSES } from './terms-content.mjs';
@@ -144,6 +144,9 @@ const RUN_COPY = {
   },
 };
 
+/** 位址顯示：0 → "0"，其餘 → 0x 開頭十六進位（開機標頭、分區表的位置依晶片而不同）。 */
+const hexAt = (a) => (a ? `0x${Number(a).toString(16).toUpperCase()}` : '0');
+
 /** 還原逐項檢查的文字。 */
 function checkLine(item, dev) {
   const d = item.data;
@@ -155,7 +158,7 @@ function checkLine(item, dev) {
         ? L(`檔案大小 ${n(d.actual)} 位元組，等於設備 flash ${mb} MB`, `File size ${n(d.actual)} bytes equals the device's ${mb} MB flash`)
         : L(`檔案大小 ${n(d.actual)} 位元組，與設備 flash ${mb} MB 不符`, `File size ${n(d.actual)} bytes does not match the ${mb} MB flash`);
     case 'header':
-      return item.level === 'ok' ? L('開機標頭正確（0xE9）', 'Boot header valid (0xE9)') : L('開機標頭不對（位址 0 的第一個位元組不是 0xE9）', 'Boot header invalid (the first byte at address 0 is not 0xE9)');
+      return item.level === 'ok' ? L('開機標頭正確（0xE9）', 'Boot header valid (0xE9)') : (d.at ? L(`開機標頭不對（位址 ${hexAt(d.at)} 的位元組不是 0xE9）`, `Boot header invalid (the byte at address ${hexAt(d.at)} is not 0xE9)`) : L('開機標頭不對（位址 0 的第一個位元組不是 0xE9）', 'Boot header invalid (the first byte at address 0 is not 0xE9)'));
     case 'meta':
       return L('缺少說明檔（.json），或說明檔讀不懂', 'The metadata (.json) is missing or unreadable');
     case 'chip':
@@ -183,17 +186,17 @@ function fwCheckLine(item, dev) {
         ? L(`檔案大小 ${n(d.actual)} 位元組，不超過設備 flash ${mb} MB`, `File size ${n(d.actual)} bytes fits in the device's ${mb} MB flash`)
         : L(`檔案大小 ${n(d.actual)} 位元組，是空檔或超過設備 flash ${mb} MB`, `File size ${n(d.actual)} bytes is empty or larger than the ${mb} MB flash`);
     case 'header':
-      return item.level === 'ok' ? L('開機標頭正確（0xE9）', 'Boot header valid (0xE9)') : L('開機標頭不對（第一個位元組不是 0xE9），這不是韌體映像', 'Boot header invalid (the first byte is not 0xE9); this is not a firmware image');
+      return item.level === 'ok' ? L('開機標頭正確（0xE9）', 'Boot header valid (0xE9)') : L(d.at ? `開機標頭不對（位址 ${hexAt(d.at)} 的位元組不是 0xE9），這不是韌體映像` : '開機標頭不對（第一個位元組不是 0xE9），這不是韌體映像', d.at ? `Boot header invalid (the byte at address ${hexAt(d.at)} is not 0xE9); this is not a firmware image` : 'Boot header invalid (the first byte is not 0xE9); this is not a firmware image');
     case 'imgchip':
       return item.level === 'ok'
         ? L(`映像標記的晶片與目前設備相符（${dev.chip}）`, `The chip marked in the image matches the connected device (${dev.chip})`)
         : L(`映像標記的晶片不是 ${dev.chip}，不能刷到這台設備`, `The image is not marked for ${dev.chip} and can't be flashed to this device`);
     case 'layout':
       return item.level === 'ok'
-        ? L('是完整映像（位址 0x8000 有分區表）', 'Complete image (partition table present at 0x8000)')
+        ? L(`是完整映像（位址 ${hexAt(d.at)} 有分區表）`, `Complete image (partition table present at ${hexAt(d.at)})`)
         : d.kind === 'app-only'
-          ? L('位址 0x8000 沒有分區表：看起來是只有主程式的 OTA 型映像，不接受', 'No partition table at 0x8000: this looks like an app-only OTA image, which is not accepted')
-          : L('位址 0x8000 沒有分區表，不是完整映像', 'No partition table at 0x8000; not a complete image');
+          ? L(`位址 ${hexAt(d.at)} 沒有分區表：看起來是只有主程式的 OTA 型映像，不接受`, `No partition table at ${hexAt(d.at)}: this looks like an app-only OTA image, which is not accepted`)
+          : L(`位址 ${hexAt(d.at)} 沒有分區表，不是完整映像`, `No partition table at ${hexAt(d.at)}; not a complete image`);
     case 'sha':
       return `${L('SHA-256（請自行與檔案來源公布的值比對）', 'SHA-256 (compare it yourself with the value published by the file’s source)')}<small class="mono">${esc(d.sha256 || '—')}</small>`;
     default:
@@ -441,6 +444,19 @@ export function startApp(opts = {}) {
     if (el) { focusHeading(el); el.scrollIntoView && el.scrollIntoView({ block: 'start' }); }
   }
 
+  /** 接到「不是人體感應器」的晶片時，依晶片列出可能是哪一種板子（只是從晶片推測，不是確認；也不代表已能刷）。 */
+  function boardsHintHtml(acc) {
+    if (!acc || acc.state !== 'wrong-chip' || !acc.boards.length) return '';
+    const names = acc.boards.map((b) => `<b>${esc(b.label[S.lang === 'zh' ? 'zh-TW' : 'en'])}</b>`).join(S.lang === 'zh' ? '、' : ', ');
+    return L(
+      `這顆晶片可能屬於 ${names} 這類板子（同一種晶片有很多板子，這只是從晶片推測，不是確認）。紅外線遙控器的刷機流程尚未開放，這一頁不會對它做任何備份、更新或還原。`,
+      `This chip may belong to a board such as ${names} (many boards share one chip, so this is only a guess from the chip, not a confirmation). Flashing the infrared remote is not available yet, and this page will not back up, update or restore it.`,
+    );
+  }
+
+  /** 第二層：辨識結果沒有開放（晶片不符、容量不符、或設定檔尚未真機驗證）就不做任何備份、更新、還原、自訂韌體。 */
+  const deviceUsable = () => deviceAccess(S.device).usable;
+
   /** 把狀態寫進目前畫面的各欄位。 */
   function refreshScreen() {
     const sc = $(`[data-screen="${S.screen}"]`, tr('panel-sensor'));
@@ -469,11 +485,12 @@ export function startApp(opts = {}) {
       case 'id-error': {
         const parts = [dev.chip];
         if (dev.flashSizeBytes) parts.push(`${Math.round(dev.flashSizeBytes / 1048576)} MB flash`);
-        bind(sc, {
-          detSummary: parts.join(' · '),
-          mac: macDisplay(dev.mac),
-          idErrTitle: dev.reason === 'wrong-flash' ? msg('Flash 容量不符，已拒絕所有操作', 'Unexpected flash size — all operations refused') : msg('不是預期的晶片，已拒絕所有操作', 'Unexpected chip — all operations refused'),
-        });
+        const acc = deviceAccess(dev);
+        const title = acc.state === 'wrong-flash' ? msg('Flash 容量不符，已拒絕所有操作', 'Unexpected flash size — all operations refused')
+          : acc.state === 'unverified' ? msg('這種設備的刷機流程尚未經真機驗證，已拒絕所有操作', 'Flashing this kind of device is not yet verified on real hardware — all operations refused')
+          : msg('不是預期的晶片，已拒絕所有操作', 'Unexpected chip — all operations refused');
+        bind(sc, { detSummary: parts.join(' · '), mac: macDisplay(dev.mac), idErrTitle: title, idBoardsHtml: boardsHintHtml(acc) });
+        box(sc, 'idBoards', acc.state === 'wrong-chip' && acc.boards.length > 0);
         break;
       }
       case 'backup-done': refreshBackupDone(sc); break;
@@ -807,7 +824,7 @@ export function startApp(opts = {}) {
       await S.flasher.connect({ baudrate: PROFILES.presence.recommendedBaud, fallbackBaudrate: 115200 });
       S.device = await S.flasher.identify({ expectedProfile: 'presence' });
       setBusy(false);
-      setScreen(S.device.profileMatch ? 'identified' : 'id-error');
+      setScreen(deviceAccess(S.device).usable ? 'identified' : 'id-error'); // 設定檔相符還要「已真機驗證」才開放
     } catch (e) {
       const fe = toFlasherLike(e, 'connect-failed');
       await quietDisconnect();
@@ -820,6 +837,7 @@ export function startApp(opts = {}) {
   }
 
   async function doBackup() {
+    if (!deviceUsable()) return;
     S.abort = new AbortController();
     S.backup = null;
     startRun('backup');
@@ -873,6 +891,7 @@ export function startApp(opts = {}) {
   }
 
   async function doUpdate() {
+    if (!deviceUsable()) return;
     const rel = S.release;
     if (!writeGateOpen('update-confirm', !!rel)) return; // 第二層：按鈕被硬開、必勾沒勾全也不寫入（與還原、自訂韌體一致）
     const erase = S.erase;
@@ -891,13 +910,15 @@ export function startApp(opts = {}) {
     }
   }
 
-  /** 寫入前最後一道閘（按鈕停用之外的第二層）：檢查通過、畫面上看得到的必勾全勾了才放行。 */
+  /** 寫入前最後一道閘（按鈕停用之外的第二層）：目前就在該確認畫面、檢查通過、畫面上看得到的必勾全勾了才放行。 */
   function writeGateOpen(screen, checkedOk) {
+    if (S.screen !== screen) return false; // 只能從該確認畫面開始寫入：離開後留在隱藏畫面裡的舊勾選不算數
     const sc = $(`[data-screen="${screen}"]`, toolRoot);
     return !!checkedOk && confirmReady({ checks: visibleReqs(sc).map((c) => c.checked) });
   }
 
   async function doRestore() {
+    if (!deviceUsable()) return;
     const r = S.restore;
     if (!writeGateOpen('restore-pick', r && r.ok)) return;
     S.lastOp = 'restore';
@@ -914,6 +935,7 @@ export function startApp(opts = {}) {
 
   /** 刷入使用者自己的韌體：與「更新」同一條引擎路徑（受保護區避開、逐段 MD5 驗證；引擎會再檢查標頭、晶片 ID、分區表）。 */
   async function doCustom() {
+    if (!deviceUsable()) return;
     const c = S.custom;
     if (!writeGateOpen('custom-pick', c && c.ok)) return;
     const erase = S.erase;
@@ -978,8 +1000,8 @@ export function startApp(opts = {}) {
     // 同種檔案的舊內容同步清掉；只有「該種類最新一次選檔」的讀取才有資格寫回
     if (kind === 'bin') { r.binTok = mine; r.binName = file.name; r.binSize = file.size; r.bin = null; }
     else { r.metaTok = mine; r.metaName = file.name; r.metaText = null; r.meta = null; r.metaError = null; }
-    invalidateRestore();
     try {
+      invalidateRestore(); // 放進 try：它若丟例外，finally 仍會把 reading 歸零，不會卡住之後的評估
       if (kind === 'bin') {
         const bin = file.size <= MAX_BIN ? new Uint8Array(await file.arrayBuffer()) : null;
         if (r.binTok === mine) r.bin = bin;
@@ -1021,7 +1043,7 @@ export function startApp(opts = {}) {
     let sha = '';
     if (snap.bin) sha = bytesToHex(new Uint8Array(await subtle.digest('SHA-256', snap.bin)));
     const chk = restoreChecks({
-      binLength: snap.binSize, firstByte: snap.bin ? snap.bin[0] : undefined, sha256: sha, meta: snap.meta, metaError: snap.metaError, device: S.device,
+      binLength: snap.binSize, firstByte: snap.bin ? snap.bin[0] : undefined, bin: snap.bin, profile: PROFILES[S.device.profile], sha256: sha, meta: snap.meta, metaError: snap.metaError, device: S.device,
     });
     let engineOk = false;
     if (snap.bin && !chk.hardFail) {
@@ -1038,7 +1060,7 @@ export function startApp(opts = {}) {
   }
 
   // ---------- 自訂韌體選檔 ----------
-  const HEAD_BYTES = 0x8002; // 開頭到分區表魔數為止
+  const HEAD_BYTES_MIN = 0x8002; // 開頭到分區表魔數為止（依設定檔的分區表位置與開機標頭位置再加大）
   async function readCustomFile(file) {
     const c = { name: file.name, size: file.size, bin: null, sha: '', ok: false, kind: 'unknown' };
     S.custom = c;
@@ -1047,6 +1069,9 @@ export function startApp(opts = {}) {
     bind(sc, { fwPickName: safeFileLabel(file.name) });
     sc.querySelector('[data-b-html="fwPickInfo"]').innerHTML = `.bin · ${formatBytesWithCommas(file.size)} ${L('位元組', 'bytes')}`;
     refreshScreen(); // 在任何 await 之前就收起確認區、停用寫入按鈕（c.ok 還是 false）
+    const profile = PROFILES[S.device.profile] || PROFILES.presence;
+    const lay = layoutOf(profile);
+    const HEAD_BYTES = Math.max(HEAD_BYTES_MIN, lay.partitionTableAddress + 2, lay.bootloaderAddress + 14);
     let head;
     try {
       // 檔案只在本機讀取；超過上限的不整個讀進來（只讀開頭給檢查用，反正會因大小不符被拒）
@@ -1061,8 +1086,7 @@ export function startApp(opts = {}) {
       head = null;
     }
     if (S.custom !== c) return; // 讀取期間又選了別的檔
-    const profile = PROFILES[S.device.profile] || PROFILES.presence;
-    const chk = customFirmwareChecks({ binLength: file.size, head, sha256: c.sha, device: S.device, imageChipId: profile.imageChipId, bootMagic: profile.bootMagic });
+    const chk = customFirmwareChecks({ binLength: file.size, head, sha256: c.sha, device: S.device, imageChipId: profile.imageChipId, bootMagic: profile.bootMagic, bootloaderAddress: lay.bootloaderAddress, partitionTableAddress: lay.partitionTableAddress });
     c.kind = chk.kind;
     c.ok = !chk.hardFail && !!c.bin && c.sha !== '';
     sc.querySelector('[data-b-html="fwChecksHtml"]').innerHTML = chk.items.map((it) =>
@@ -1098,7 +1122,11 @@ export function startApp(opts = {}) {
 
   function closeTerms() { S.termsOpen = false; render(); }
 
+  /** 這些動作都要「辨識結果已開放」才有效；辨識錯誤、尚未真機驗證、未連線時就算事件被硬派發也不換畫面、不呼叫引擎。 */
+  const NEEDS_USABLE_DEVICE = new Set(['backup', 'update', 'start-update', 'restore', 'start-restore', 'custom', 'start-custom']);
+
   async function onAct(name, el) {
+    if (NEEDS_USABLE_DEVICE.has(name) && !deviceUsable()) return;
     switch (name) {
       case 'copy-url': await copyText(win.location.href.split('#')[0], $('[data-b="copyDone"]', el.closest('.card'))); break;
       case 'choose-sensor': // 選設備只是前置畫面：只換畫面，不連接、不寫入；寫入入口的勾選與檢查閘門都在後面的畫面，完全不變

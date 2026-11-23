@@ -1,0 +1,20 @@
+# 藍牙代理：M5Stack ATOM Lite（ESP32-PICO-D4，4 MB flash）。共用內容在 btproxy-common.yaml。
+# 這份設定沒有用到任何板上腳位。日誌與 improv_serial 走 UART0（板上 USB 轉序列晶片，尚未在真機確認，見 README）。
+substitutions:
+  devicename: bluetooth-proxy
+  upper_devicename: Bluetooth Proxy
+  mac_suffix: "true"
+
+esp32:
+  board: esp32dev
+  flash_size: 4MB
+  framework:
+    type: esp-idf
+
+logger:
+  level: INFO
+
+packages:
+  common: !include btproxy-common.yaml
+
+improv_serial:

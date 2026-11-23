@@ -1,0 +1,22 @@
+# 藍牙代理：M5Stack AtomS3 Lite（ESP32-S3，8 MB flash）。共用內容在 btproxy-common.yaml。
+# 只針對 AtomS3 Lite（無螢幕版）；有螢幕的 AtomS3 沒有驗證過，不適用。
+# 這份設定沒有用到任何板上腳位。日誌與 improv_serial 走 ESP32-S3 內建的 USB-Serial/JTAG（尚未在真機確認，見 README）。
+substitutions:
+  devicename: bluetooth-proxy
+  upper_devicename: Bluetooth Proxy
+  mac_suffix: "true"
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+
+logger:
+  level: INFO
+  hardware_uart: USB_SERIAL_JTAG
+
+packages:
+  common: !include btproxy-common.yaml
+
+improv_serial:

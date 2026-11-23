@@ -201,13 +201,15 @@ const PRESENCE = {
 };
 const IRSETUP = [['刷完自己配網、接 Home Assistant', 'Set up Wi-Fi yourself, connect to Home Assistant'], ['不含任何人的私人設定與金鑰；刷好後由你自己設定網路並加入 Home Assistant。', 'No one’s private settings or keys inside; after flashing you set up the network and add it to Home Assistant yourself.']];
 const IRPULSE = [['Home Assistant 送出原始脈衝', 'Home Assistant sends raw pulses'], ['由 Home Assistant 送出紅外線的原始脈衝資料，板子照著發射。', 'Home Assistant sends raw infrared pulse data and the board emits it as is.']];
-/** 紅外線、藍牙代理、ESP8266 三張卡共用：對外的意思是「沒有公開版」（作者自己手上可能有自用版，但那不是這個頁面能刷的）。 */
+/** ESP8266 卡專用：規劃中，還沒有任何公開版韌體或原始碼；上面所有項目都只是方向。 */
 const NOFW = ['目前沒有公開版韌體，公開版也還沒實測，沒有預計開放時間；上面所有項目都是方向，不是已完成的功能。', 'There is no public firmware yet and the public version has not been tested; there is no release date. Everything above is a direction, not a finished feature.'];
 /** 紅外線卡專用：原始碼已公開但沒有編譯好的韌體，也沒有真機驗證。 */
-const NOFW_IR = ['紅外線遙控器的原始碼已公開在 esphome/ 資料夾（尚未經真機驗證），但沒有編譯好的韌體可從這個頁面刷入。', 'The infrared remote source code is public in the esphome/ folder (not yet verified on real hardware), but there is no compiled firmware you can flash from this page.'];
+const NOFW_IR = ['紅外線遙控器的原始碼已公開在本專案的 esphome/ 資料夾（尚未經真機驗證），但沒有編譯好的韌體可從這個頁面刷入。', 'The infrared remote source code is public in this project’s esphome/ folder (not yet verified on real hardware), but there is no compiled firmware you can flash from this page.'];
+/** 藍牙代理卡專用：原始碼已公開（兩塊板子）但沒有編譯好的韌體，也沒有真機驗證。 */
+const NOFW_BT = ['藍牙代理的原始碼已公開在本專案的 esphome/ 資料夾（尚未經真機驗證），但沒有編譯好的韌體可從這個頁面刷入。', 'The Bluetooth proxy source code is public in this project’s esphome/ folder (not yet verified on real hardware), but there is no compiled firmware you can flash from this page.'];
 const SOON = {
   ir: {
-    id: 'ir', flow: 'irflow', status: 'soon', cnt: ['三種板子', '3 boards'], boardsTitle: ['三塊板子', 'The three boards'],
+    id: 'ir', flow: 'irflow', status: 'soon', srcOnly: true, cnt: ['三種板子', '3 boards'], boardsTitle: ['三塊板子', 'The three boards'],
     boardsNote: ['功能相同，只差板型。簡圖是示意，外形、USB 孔與紅外線發射位置以實物為準。', 'Same features, different boards. The sketches are approximate; shapes and the USB and IR emitter positions follow the real boards.'],
     name: ['紅外線遙控器', 'IR remote'],
     lead: ['讓 Home Assistant 用一塊小板子控制電視、冷氣等紅外線家電。', 'Lets Home Assistant control TVs, air conditioners and other infrared appliances through a small board.'],
@@ -228,7 +230,7 @@ const SOON = {
     ],
   },
   bt: {
-    id: 'bt', flow: 'btflow', status: 'soon', cnt: ['兩種板子', '2 boards'], boardsTitle: ['兩塊板子', 'The two boards'],
+    id: 'bt', flow: 'btflow', status: 'soon', srcOnly: true, cnt: ['兩種板子', '2 boards'], boardsTitle: ['兩塊板子', 'The two boards'],
     boardsNote: ['功能相同，只差板型。簡圖是示意；藍牙是板子內建的無線電，沒有固定位置。', 'Same features, different boards. The sketches are approximate; Bluetooth is a built-in radio with no fixed spot on the board.'],
     name: ['藍牙代理', 'Bluetooth proxy'],
     lead: ['讓 Home Assistant 透過一塊小板子收到附近的藍牙裝置訊號，延伸藍牙的覆蓋範圍。', 'Lets Home Assistant receive signals from nearby Bluetooth devices through a small board, extending its Bluetooth coverage.'],
@@ -239,10 +241,10 @@ const SOON = {
     ],
     feats: [
       [IRSETUP[0], IRSETUP[1], null],
-      [['轉送藍牙廣播', 'Relay Bluetooth broadcasts'], ['板子收下附近藍牙裝置的廣播，轉給 Home Assistant，讓離主機太遠的藍牙裝置也看得到。', 'The board picks up nearby Bluetooth devices’ broadcasts and passes them to Home Assistant, so devices too far from the host can still be seen.'], ['具體功能範圍（有沒有設備網頁、要不要主動連線等）還沒決定。', 'The exact scope (a device page, active connections, …) has not been decided yet.']],
+      [['轉送藍牙廣播', 'Relay Bluetooth broadcasts'], ['板子收下附近藍牙裝置的廣播，轉給 Home Assistant，讓離主機太遠的藍牙裝置也看得到。', 'The board picks up nearby Bluetooth devices’ broadcasts and passes them to Home Assistant, so devices too far from the host can still be seen.'], ['公開的原始碼採主動連線（Home Assistant 也能透過板子主動連到藍牙裝置），沒有裝置網頁；尚未經真機驗證。', 'The public source uses active connections (Home Assistant can also connect to Bluetooth devices through the board) and has no device web page; not yet verified on real hardware.']],
     ],
     know: [
-      NOFW,
+      NOFW_BT,
       ['兩塊板子外形相近：規劃日後支援時，刷機頁連接後會用晶片辨識是哪一款（現在還不支援）。', 'The two boards look alike: once supported, the flasher is planned to tell them apart by chip after connecting (not supported yet).'],
     ],
   },
@@ -298,7 +300,9 @@ function cardPresence(ver) {
   </article>`;
 }
 function cardSoon(D) {
-  const tagTxt = D.status === 'plan' ? L('規劃中，尚無公開版韌體', 'Planned, no public firmware yet') : L('尚無公開版韌體、公開版尚未實測', 'No public firmware yet, public version untested');
+  const tagTxt = D.status === 'plan' ? L('規劃中，尚無公開版韌體', 'Planned, no public firmware yet')
+    : D.srcOnly ? L('原始碼已公開、尚無編譯好的韌體、尚未實測', 'Source is public, no compiled firmware yet, untested')
+      : L('尚無公開版韌體、公開版尚未實測', 'No public firmware yet, public version untested');
   return `
   <article class="pcard soon" aria-labelledby="t-${D.id}" data-device="${D.id}" data-flashable="false">
     <div class="art"><span class="badge tag soon">${ic('clock')}${D.status === 'plan' ? L('規劃中', 'Planned') : L('即將推出', 'Coming soon')}</span>
@@ -351,7 +355,7 @@ export function renderDetail(id, ctx = {}) {
     <section class="hero"><div class="art"><div class="boards n${D.boards.length}">${D.boards.map(([bid, n, c]) => boardTile(bid, n, c)).join('')}</div><span class="sub mono">${L('手繪示意 · 位置與外形以實物為準', 'sketch · positions and shape follow the real device')}</span></div>
       <div class="sec"><div class="meta"><span class="tag soon">${ic('clock')}${tag}</span></div>
         <h2 class="big" tabindex="-1">${B(D.name)}</h2><p class="lead">${B(D.lead)}</p>
-        <div class="btns">${lockedBtn()}<span class="abhint">${L('沒有公開版韌體可以刷，也沒有預計開放時間。', 'There is no public firmware to flash and no planned release date.')}</span></div></div></section>
+        <div class="btns">${lockedBtn()}<span class="abhint">${D.srcOnly ? L('沒有編譯好的韌體可以從這個頁面刷，也沒有預計開放時間。', 'There is no compiled firmware to flash from this page and no planned release date.') : L('沒有公開版韌體可以刷，也沒有預計開放時間。', 'There is no public firmware to flash and no planned release date.')}</span></div></div></section>
     <section class="sec">${hx(D.boardsTitle[0], D.boardsTitle[1])}<p class="sub">${B(D.boardsNote)}</p><div class="boards big n${D.boards.length}">${D.boards.map(([bid, n, c]) => boardTile(bid, n, c)).join('')}</div></section>
     <section class="sec">${hx('功能與好處', 'Features and benefits')}<p class="sub">${L('標「規劃中」的是還在規劃、尚未提供的項目。', 'Items marked “Planned” are still being planned and are not available yet.')}</p>
       <ul class="feat plan">${D.feats.map(([t, d, extra]) => `<li>${ic('clock')}<div><b>${B(t)}</b><span>${B(d)}</span><span>${planTag()}</span>${extra ? `<span class="sub">${B(extra)}</span>` : ''}</div></li>`).join('')}</ul></section>

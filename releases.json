@@ -12,7 +12,7 @@
       "zh": "首次公開版本：人體感應器（ESP32-C3）通用韌體。Wi-Fi 設定預設留空，首次啟動後用配網方式設定。韌體以 GPL-3.0 開源，對應原始碼放在本專案的 esphome/ 資料夾。刷入前請先備份原廠韌體。",
       "en": "First public release: general-purpose firmware for the presence sensor (ESP32-C3). Wi-Fi credentials are empty by default; set them up through provisioning after the first boot. The firmware is open source under GPL-3.0, and the matching source code is in the esphome/ folder of this project. Please back up the original firmware before flashing."
     },
-    "source_sha256": "4f00f8c2135516b40022c5f2ebb16bca36d2e9a48c659ae8ad75ced6671696ad",
+    "source_sha256": "d5bf4c407d1fa12fa49b6b05789da1078692298bce4730cf0e998a40332fdb4b",
     "terms_version": "v0.3"
   },
   {
@@ -28,7 +28,7 @@
       "zh": "首次公開版本：人體感應器（ESP32-C3）通用韌體。Wi-Fi 設定預設留空，首次啟動後用配網方式設定。韌體以 GPL-3.0 開源，對應原始碼放在本專案的 esphome/ 資料夾。刷入前請先備份原廠韌體。",
       "en": "First public release: general-purpose firmware for the presence sensor (ESP32-C3). Wi-Fi credentials are empty by default; set them up through provisioning after the first boot. The firmware is open source under GPL-3.0, and the matching source code is in the esphome/ folder of this project. Please back up the original firmware before flashing."
     },
-    "source_sha256": "4f00f8c2135516b40022c5f2ebb16bca36d2e9a48c659ae8ad75ced6671696ad",
+    "source_sha256": "d5bf4c407d1fa12fa49b6b05789da1078692298bce4730cf0e998a40332fdb4b",
     "terms_version": "v0.3"
   }
 ]

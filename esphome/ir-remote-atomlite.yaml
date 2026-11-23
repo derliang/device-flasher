@@ -1,6 +1,7 @@
 # 紅外線遙控器：M5Stack ATOM Lite（ESP32-PICO-D4，4 MB flash）。共用內容在 ir-remote-common.yaml。
 # 腳位（M5Stack 官方文件）：紅外線發射 LED＝GPIO12。接收頭接 Grove 孔的 GPIO26（黃線）；兩個腳位都可用 ir_tx_pin、ir_rx_pin 覆寫。
 # 板上沒有紅外線接收元件。日誌與 improv_serial 走 UART0（板上 USB 轉序列晶片）。
+# 注意：GPIO12 是 ESP32 的 strapping 腳（開機時的電位決定 flash 供電電壓），官方把它接到紅外線 LED；開機時與 LED 的互相影響尚未在真機驗證。
 substitutions:
   devicename: ir-remote
   upper_devicename: IR Remote

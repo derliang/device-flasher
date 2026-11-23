@@ -1,0 +1,103 @@
+# 藍牙代理（ESPHome Bluetooth Proxy）通用韌體：共用主體。
+# 本檔由各板產品檔（btproxy-atoms3-lite.yaml、btproxy-atomlite.yaml）以 packages 引入；
+# 產品檔只放「這片板子才有的東西」：晶片設定與日誌介面。這份韌體沒有用到任何板上腳位（沒有燈、沒有按鍵、沒有紅外線）。
+#
+# 功能：
+#   1. 藍牙代理：板子收附近藍牙裝置的廣播，轉給 Home Assistant，延伸藍牙的覆蓋範圍；
+#      active: true 時也允許 Home Assistant 透過這塊板子主動連線到藍牙裝置（連線數用 ESPHome 預設值）。
+#      掃描間隔與掃描視窗不手動指定，用 ESPHome 內建的預設值（ESPHome 依 Wi-Fi 與藍牙共用同一顆無線電的情況自行調整）。
+#   2. 刷好後用 improv_serial（USB 線＋支援 Improv Serial 的工具，例如 ESPHome 的網頁安裝工具）自己設定 Wi-Fi，
+#      或連到裝置自己的備援熱點（無密碼的開放熱點）設定，再被 Home Assistant 找到。
+#   3. 名稱加 MAC 尾碼（bluetooth-proxy-xxxxxx），多台放在同一個網路不會撞名。
+#   4. 不含任何 Wi-Fi 帳密、API 加密金鑰或 OTA 密碼：Wi-Fi 在裝置上設定（improv／熱點配網）；
+#      API 先接受明文，Home Assistant 連上後可自行產生金鑰（要清掉只能恢復出廠）。
+#
+# 注意：
+#   - 沒有裝置網頁（web_server）：藍牙代理很吃記憶體，第一版先不開；韌體更新走 ESPHome OTA（esphome upload）。
+#   - 這份是「不指定位置、不指定房間」的通用版；放哪裡、叫什麼名字都在 Home Assistant 設定。
+
+substitutions:
+  # 對外版號（日期編號 YYYY.MM.DD，同日第二版起加 .2）
+  firmware_version: "2026.11.23"
+  devicename: bluetooth-proxy
+  upper_devicename: Bluetooth Proxy
+  # 產品版：名稱加 MAC 尾碼，多台不撞名
+  mac_suffix: "true"
+  comment: Bluetooth proxy (relay Bluetooth advertisements to Home Assistant)
+
+esphome:
+  name: $devicename
+  friendly_name: $upper_devicename
+  name_add_mac_suffix: ${mac_suffix}
+  comment: $comment
+  project:
+    name: "community.BluetoothProxy"
+    version: ${firmware_version}
+  min_version: "2026.10.0"
+
+api:
+  # 沒有 Home Assistant 連著時也不要自己重開機（預設 15 分鐘沒人連就重開）
+  reboot_timeout: 0s
+  # 不寫金鑰：先接受明文，HA 連上後可自己產生金鑰寫入。要清掉金鑰只能恢復出廠
+  encryption: {}
+
+ota:
+  - platform: esphome
+
+safe_mode:
+  boot_is_good_after: 1min
+  num_attempts: 10
+
+# 不寫 SSID：帳密存在裝置裡。沒存過時開機就開熱點；有存過時斷線 5 分鐘才開，連回後自動關閉
+wifi:
+  min_auth_mode: WPA2
+  ap:
+    ap_timeout: 5min
+  # 藍牙與 Wi-Fi 共用同一顆無線電，不開 Wi-Fi 省電
+  power_save_mode: NONE
+  reboot_timeout: 1h
+
+captive_portal:
+
+mdns:
+  disabled: false
+
+# 主動掃描：Home Assistant 要靠它拿到藍牙裝置的名稱等資訊（主動連線型的代理都需要）
+esp32_ble_tracker:
+  scan_parameters:
+    active: true
+
+bluetooth_proxy:
+  active: true
+
+button:
+  - platform: restart
+    name: "Restart"
+    entity_category: diagnostic
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+      entity_category: diagnostic
+    mac_address:
+      name: "MAC Address"
+      entity_category: diagnostic
+  - platform: version
+    name: "ESPHome Version"
+    entity_category: diagnostic
+
+sensor:
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 300s
+    entity_category: diagnostic
+  - platform: uptime
+    name: "Uptime"
+    update_interval: 300s
+    entity_category: diagnostic
+
+binary_sensor:
+  - platform: status
+    name: "API Connection"
+    entity_category: diagnostic

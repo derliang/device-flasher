@@ -28,6 +28,7 @@ This folder is licensed under the GNU General Public License v3.0 (see [LICENSE]
 ### 網頁載入的外部資源
 
 - 網址加 `?native` 時，網頁會改載入 ESPHome 官方的原始介面腳本（`https://oi.esphome.io/v3/www.js`），僅此一處，且只有使用者主動切換時才會載入。
+- 紅外線遙控器韌體（`ir-remote-*.yaml`）的裝置網頁使用 ESPHome 內建 `web_server` 的預設介面（版本 3），預設會從同一個網站（`https://oi.esphome.io/v3/www.js`）載入 ESPHome 官方的介面腳本；沒有修改這個預設行為，所以開那個網頁的電腦需要能連上網際網路，沒有網際網路時網頁可能無法顯示（尚未驗證）。
 
 ## ESPHome 授權文字（保留）
 
@@ -52,3 +53,9 @@ This folder is licensed under the GNU General Public License v3.0 (see [LICENSE]
 > SOFTWARE.
 
 ESPHome 專案：<https://github.com/esphome/esphome>
+
+## 藍牙代理（btproxy-*.yaml）
+
+- `btproxy-common.yaml`、`btproxy-atoms3-lite.yaml`、`btproxy-atomlite.yaml`：本專案自行撰寫（GPL-3.0），只使用 ESPHome 內建元件（`esp32_ble_tracker`、`bluetooth_proxy` 等），沒有複製或修改第三方程式碼。
+- 刷機頁目前不提供這些韌體，也沒有發布編譯好的 bin，這裡只提供原始碼；尚未經真機驗證。
+- 這兩份韌體沒有 `web_server`（沒有裝置網頁），因此沒有載入 ESPHome 官方網站介面腳本的外部資源；備援熱點的設定頁是 ESPHome 內建的 captive portal。
